@@ -23,11 +23,11 @@ def create_settings_tab(notebook, app):
     montage_tab = ttk.Frame(settings_notebook)
     other_tab = ttk.Frame(settings_notebook)
 
-    settings_notebook.add(api_tab, text="API")
+    settings_notebook.add(api_tab, text=app._t('api_tab_label'))
     settings_notebook.add(languages_tab, text=app._t('language_settings_label'))
-    settings_notebook.add(prompts_tab, text="Промпти")
-    settings_notebook.add(montage_tab, text="Монтаж")
-    settings_notebook.add(other_tab, text="Інше")
+    settings_notebook.add(prompts_tab, text=app._t('prompts_tab_label'))
+    settings_notebook.add(montage_tab, text=app._t('montage_tab_label'))
+    settings_notebook.add(other_tab, text=app._t('other_tab_label'))
 
     create_api_settings_subtabs(api_tab, app)
     create_language_settings_tab(languages_tab, app)
@@ -49,13 +49,13 @@ def create_api_settings_subtabs(parent_tab, app):
     audio_tab = ttk.Frame(api_notebook)
     image_tab = ttk.Frame(api_notebook)
 
-    api_notebook.add(or_tab, text="OpenRouter")
-    api_notebook.add(audio_tab, text="Audio")
-    api_notebook.add(image_tab, text="Image")
+    api_notebook.add(or_tab, text=app._t('openrouter_tab_label'))
+    api_notebook.add(audio_tab, text=app._t('audio_tab_label'))
+    api_notebook.add(image_tab, text=app._t('image_tab_label'))
 
     # --- OpenRouter Settings ---
     _, or_scroll_frame = app._create_scrollable_tab(or_tab)
-    or_frame = ttk.Labelframe(or_scroll_frame, text="OpenRouter")
+    or_frame = ttk.Labelframe(or_scroll_frame, text=app._t('openrouter_settings_label'))
     or_frame.pack(fill='x', padx=10, pady=5)
     or_frame.grid_columnconfigure(1, weight=1)
     ttk.Label(or_frame, text=app._t('api_key_label')).grid(row=0, column=0, sticky='w', padx=5, pady=5)
@@ -82,12 +82,12 @@ def create_api_settings_subtabs(parent_tab, app):
     el_tab = ttk.Frame(audio_notebook)
     vm_tab = ttk.Frame(audio_notebook)
     speechify_tab = ttk.Frame(audio_notebook)
-    audio_notebook.add(el_tab, text="ElevenLabs")
-    audio_notebook.add(vm_tab, text="Voicemaker")
-    audio_notebook.add(speechify_tab, text="Speechify")
+    audio_notebook.add(el_tab, text=app._t('elevenlabs_tab_label'))
+    audio_notebook.add(vm_tab, text=app._t('voicemaker_tab_label'))
+    audio_notebook.add(speechify_tab, text=app._t('speechify_tab_label'))
 
     _, el_scroll_frame = app._create_scrollable_tab(el_tab)
-    el_frame = ttk.Labelframe(el_scroll_frame, text="ElevenLabs")
+    el_frame = ttk.Labelframe(el_scroll_frame, text=app._t('elevenlabs_settings_label'))
     el_frame.pack(fill='x', padx=10, pady=5)
     el_frame.grid_columnconfigure(1, weight=1)
     ttk.Label(el_frame, text=app._t('api_key_label')).grid(row=0, column=0, sticky='w', padx=5, pady=5)
@@ -100,7 +100,7 @@ def create_api_settings_subtabs(parent_tab, app):
     app.settings_el_balance_label.grid(row=1, column=0, columnspan=3, sticky='w', padx=5, pady=5)
 
     _, vm_scroll_frame = app._create_scrollable_tab(vm_tab)
-    vm_frame = ttk.Labelframe(vm_scroll_frame, text="Voicemaker")
+    vm_frame = ttk.Labelframe(vm_scroll_frame, text=app._t('voicemaker_settings_label'))
     vm_frame.pack(fill='x', padx=10, pady=5)
     vm_frame.grid_columnconfigure(1, weight=1)
     ttk.Label(vm_frame, text=app._t('api_key_label')).grid(row=0, column=0, sticky='w', padx=5, pady=5)
@@ -115,7 +115,7 @@ def create_api_settings_subtabs(parent_tab, app):
     app.settings_vm_balance_label.grid(row=1, column=0, columnspan=3, sticky='w', padx=5, pady=5)
 
     # Нове поле для ліміту символів
-    ttk.Label(vm_frame, text="Ліміт символів:").grid(row=2, column=0, sticky='w', padx=5, pady=5)
+    ttk.Label(vm_frame, text=app._t('char_limit_label')).grid(row=2, column=0, sticky='w', padx=5, pady=5)
     app.vm_char_limit_var = tk.IntVar(value=app.config.get("voicemaker", {}).get("char_limit", 9900))
     vm_char_limit_spinbox = ttk.Spinbox(vm_frame, from_=1000, to=10000, increment=100, textvariable=app.vm_char_limit_var, width=10)
     vm_char_limit_spinbox.grid(row=2, column=1, sticky='w', padx=5, pady=5)
@@ -123,7 +123,7 @@ def create_api_settings_subtabs(parent_tab, app):
 
     # --- Speechify Settings ---
     _, speechify_scroll_frame = app._create_scrollable_tab(speechify_tab)
-    speechify_frame = ttk.Labelframe(speechify_scroll_frame, text="Speechify")
+    speechify_frame = ttk.Labelframe(speechify_scroll_frame, text=app._t('speechify_settings_label'))
     speechify_frame.pack(fill='x', padx=10, pady=5)
     speechify_frame.grid_columnconfigure(1, weight=1)
     ttk.Label(speechify_frame, text=app._t('api_key_label')).grid(row=0, column=0, sticky='w', padx=5, pady=5)
@@ -138,12 +138,12 @@ def create_api_settings_subtabs(parent_tab, app):
     image_notebook.pack(fill="both", expand=True, padx=5, pady=5)
     poll_tab = ttk.Frame(image_notebook)
     recraft_tab = ttk.Frame(image_notebook)
-    image_notebook.add(poll_tab, text="Pollinations")
-    image_notebook.add(recraft_tab, text="Recraft")
+    image_notebook.add(poll_tab, text=app._t('pollinations_tab_label'))
+    image_notebook.add(recraft_tab, text=app._t('recraft_tab_label'))
 
     # --- Pollinations Settings ---
     _, poll_scroll_frame = app._create_scrollable_tab(poll_tab)
-    poll_frame = ttk.Labelframe(poll_scroll_frame, text="Pollinations")
+    poll_frame = ttk.Labelframe(poll_scroll_frame, text=app._t('pollinations_settings_label'))
     poll_frame.pack(fill='x', padx=10, pady=5)
     poll_frame.grid_columnconfigure(1, weight=1)
     ttk.Label(poll_frame, text=app._t('api_key_optional_label')).grid(row=0, column=0, sticky='w', padx=5, pady=5)
@@ -274,7 +274,7 @@ def create_prompts_settings_tab(parent_tab, app):
     trans_temp_spinbox.grid(row=1, column=1, sticky='w', padx=5, pady=5)
     add_text_widget_bindings(app, trans_temp_spinbox)
 
-    ttk.Label(trans_prompt_frame, text="Max Tokens:").grid(row=2, column=0, sticky='w', padx=5, pady=5)
+    ttk.Label(trans_prompt_frame, text=app._t('max_tokens_label')).grid(row=2, column=0, sticky='w', padx=5, pady=5)
     app.trans_tokens_var = tk.IntVar(value=app.config["openrouter"]["translation_params"].get("max_tokens", 1000))
     trans_tokens_spinbox = ttk.Spinbox(trans_prompt_frame, from_=1, to=128000, textvariable=app.trans_tokens_var, width=10)
     trans_tokens_spinbox.grid(row=2, column=1, sticky='w', padx=5, pady=5)
@@ -290,13 +290,13 @@ def create_prompts_settings_tab(parent_tab, app):
     app.or_rewrite_model_combo.grid(row=0, column=1, columnspan=2, sticky='ew', padx=5, pady=5)
     add_text_widget_bindings(app, app.or_rewrite_model_combo)
 
-    ttk.Label(rewrite_frame, text="Temperature:").grid(row=1, column=0, sticky='w', padx=5, pady=5)
+    ttk.Label(rewrite_frame, text=app._t('temperature_label')).grid(row=1, column=0, sticky='w', padx=5, pady=5)
     app.rewrite_temp_var = tk.DoubleVar(value=app.config["openrouter"]["rewrite_params"].get("temperature", 0.7))
     rewrite_temp_spinbox = ttk.Spinbox(rewrite_frame, from_=0.0, to=2.0, increment=0.1, textvariable=app.rewrite_temp_var, width=10)
     rewrite_temp_spinbox.grid(row=1, column=1, sticky='w', padx=5, pady=5)
     add_text_widget_bindings(app, rewrite_temp_spinbox)
 
-    ttk.Label(rewrite_frame, text="Max Tokens:").grid(row=2, column=0, sticky='w', padx=5, pady=5)
+    ttk.Label(rewrite_frame, text=app._t('max_tokens_label')).grid(row=2, column=0, sticky='w', padx=5, pady=5)
     app.rewrite_tokens_var = tk.IntVar(value=app.config["openrouter"]["rewrite_params"].get("max_tokens", 4000))
     rewrite_tokens_spinbox = ttk.Spinbox(rewrite_frame, from_=1, to=128000, textvariable=app.rewrite_tokens_var, width=10)
     rewrite_tokens_spinbox.grid(row=2, column=1, sticky='w', padx=5, pady=5)
@@ -345,13 +345,13 @@ def create_prompts_settings_tab(parent_tab, app):
     app.or_prompt_model_combo.grid(row=1, column=1, sticky='ew', padx=5, pady=5)
     add_text_widget_bindings(app, app.or_prompt_model_combo)
 
-    ttk.Label(prompt_gen_frame, text="Temperature:").grid(row=2, column=0, sticky='w', padx=5, pady=5) 
+    ttk.Label(prompt_gen_frame, text=app._t('temperature_label')).grid(row=2, column=0, sticky='w', padx=5, pady=5) 
     app.prompt_gen_temp_var = tk.DoubleVar(value=app.config["openrouter"]["prompt_params"].get("temperature", 0.8))
     prompt_gen_temp_spinbox = ttk.Spinbox(prompt_gen_frame, from_=0.0, to=2.0, increment=0.1, textvariable=app.prompt_gen_temp_var, width=10)
     prompt_gen_temp_spinbox.grid(row=2, column=1, sticky='w', padx=5, pady=5)
     add_text_widget_bindings(app, prompt_gen_temp_spinbox)
     
-    ttk.Label(prompt_gen_frame, text="Max Tokens:").grid(row=3, column=0, sticky='w', padx=5, pady=5)
+    ttk.Label(prompt_gen_frame, text=app._t('max_tokens_label')).grid(row=3, column=0, sticky='w', padx=5, pady=5)
     app.prompt_gen_tokens_var = tk.IntVar(value=app.config["openrouter"]["prompt_params"].get("max_tokens", 500))
     prompt_gen_tokens_spinbox = ttk.Spinbox(prompt_gen_frame, from_=1, to=128000, textvariable=app.prompt_gen_tokens_var, width=10)
     prompt_gen_tokens_spinbox.grid(row=3, column=1, sticky='w', padx=5, pady=5)
@@ -400,13 +400,13 @@ def create_prompts_settings_tab(parent_tab, app):
     app.or_cta_model_combo.grid(row=1, column=1, sticky='ew', padx=5, pady=5)
     add_text_widget_bindings(app, app.or_cta_model_combo)
 
-    ttk.Label(cta_frame, text="Temperature:").grid(row=2, column=0, sticky='w', padx=5, pady=5)
+    ttk.Label(cta_frame, text=app._t('temperature_label')).grid(row=2, column=0, sticky='w', padx=5, pady=5)
     app.cta_temp_var = tk.DoubleVar(value=app.config["openrouter"]["cta_params"].get("temperature", 0.7))
     cta_temp_spinbox = ttk.Spinbox(cta_frame, from_=0.0, to=2.0, increment=0.1, textvariable=app.cta_temp_var, width=10)
     cta_temp_spinbox.grid(row=2, column=1, sticky='w', padx=5, pady=5)
     add_text_widget_bindings(app, cta_temp_spinbox)
 
-    ttk.Label(cta_frame, text="Max Tokens:").grid(row=3, column=0, sticky='w', padx=5, pady=5)
+    ttk.Label(cta_frame, text=app._t('max_tokens_label')).grid(row=3, column=0, sticky='w', padx=5, pady=5)
     app.cta_tokens_var = tk.IntVar(value=app.config["openrouter"]["cta_params"].get("max_tokens", 200))
     cta_tokens_spinbox = ttk.Spinbox(cta_frame, from_=1, to=8000, textvariable=app.cta_tokens_var, width=10)
     cta_tokens_spinbox.grid(row=3, column=1, sticky='w', padx=5, pady=5)
@@ -461,7 +461,13 @@ def create_montage_settings_tab(parent_tab, app):
     ttk.Checkbutton(motion_frame, text=app._t('enable_motion_label'), variable=app.montage_motion_enabled_var, bootstyle="light-round-toggle").grid(row=0, column=0, columnspan=2, sticky='w', padx=5)
     ttk.Label(motion_frame, text=app._t('motion_type_label')).grid(row=1, column=0, sticky='w', padx=5, pady=2)
     app.montage_motion_type_var = tk.StringVar(value=montage_cfg.get('motion_type'))
-    motion_options = ["Гойдання (ліво-право)", "Гойдання (верх-низ)", "Гойдання (знак нескінченності)", "Випадковий"]
+    
+    motion_options = [
+        app._t('motion_type_swing_lr'), 
+        app._t('motion_type_swing_ud'), 
+        app._t('motion_type_infinity'), 
+        app._t('motion_type_random')
+    ]
     motion_combo = ttk.Combobox(motion_frame, textvariable=app.montage_motion_type_var, values=motion_options, state="readonly")
     motion_combo.grid(row=1, column=1, sticky='ew', padx=5, pady=2)
     add_text_widget_bindings(app, motion_combo)
@@ -483,7 +489,8 @@ def create_montage_settings_tab(parent_tab, app):
     
     ttk.Label(montage_frame, text=app._t('transition_effect_label')).grid(row=5, column=0, sticky='w', padx=5, pady=2)
     app.montage_transition_var = tk.StringVar(value=montage_cfg.get('transition_effect'))
-    transitions = ["Без переходу", "fade", "wipeleft", "wiperight", "wipeup", "wipedown", "slideleft", "slideright", "slideup", "slidedown", "circleopen", "dissolve"]
+    
+    transitions = [app._t('transition_none'), "fade", "wipeleft", "wiperight", "wipeup", "wipedown", "slideleft", "slideright", "slideup", "slidedown", "circleopen", "dissolve"]
     transition_combo = ttk.Combobox(montage_frame, textvariable=app.montage_transition_var, values=transitions, state="readonly")
     transition_combo.grid(row=5, column=1, sticky='ew', padx=5, pady=2)
     add_text_widget_bindings(app, transition_combo)
@@ -601,21 +608,27 @@ def create_other_settings_tab(parent_tab, app):
 
     ttk.Label(general_frame, text=app._t('theme_label')).grid(row=1, column=0, sticky='w', padx=5, pady=5)
     app.theme_var = tk.StringVar()
-    theme_combo = ttk.Combobox(general_frame, textvariable=app.theme_var, values=["Current (Darkly)", "Pure Black", "White"], state="readonly")
+    
+    theme_display_names = [app._t('theme_darkly'), app._t('theme_cyborg'), app._t('theme_litera')]
+    theme_combo = ttk.Combobox(general_frame, textvariable=app.theme_var, values=theme_display_names, state="readonly")
     theme_combo.grid(row=1, column=1, sticky='ew', padx=5, pady=5)
     add_text_widget_bindings(app, theme_combo)
     theme_combo.bind("<<ComboboxSelected>>", app.on_theme_changed)
     
-    theme_map = {"darkly": "Current (Darkly)", "cyborg": "Pure Black", "litera": "White"}
-    current_theme = app.config.get("ui_settings", {}).get("theme", "darkly")
-    app.theme_var.set(theme_map.get(current_theme, "Current (Darkly)"))
+    theme_map_to_display = {
+        "darkly": app._t('theme_darkly'), 
+        "cyborg": app._t('theme_cyborg'), 
+        "litera": app._t('theme_litera')
+    }
+    current_theme_key = app.config.get("ui_settings", {}).get("theme", "darkly")
+    app.theme_var.set(theme_map_to_display.get(current_theme_key, app._t('theme_darkly')))
 
     ttk.Label(general_frame, text=app._t('image_api_label')).grid(row=2, column=0, sticky='w', padx=5, pady=5)
     app.image_api_var = tk.StringVar(value=app.config.get("ui_settings", {}).get("image_generation_api", "pollinations"))
     image_api_combo = ttk.Combobox(general_frame, textvariable=app.image_api_var, values=["pollinations", "recraft"], state="readonly")
     image_api_combo.grid(row=2, column=1, sticky='ew', padx=5, pady=5)
     app.image_control_var = tk.BooleanVar(value=app.config.get("ui_settings", {}).get("image_control_enabled", False))
-    ttk.Checkbutton(general_frame, variable=app.image_control_var, text="Контроль зображень").grid(row=3, column=0, columnspan=2, sticky='w', padx=5, pady=5)
+    ttk.Checkbutton(general_frame, variable=app.image_control_var, text=app._t('image_control_label')).grid(row=3, column=0, columnspan=2, sticky='w', padx=5, pady=5)
 
     output_cfg = app.config.get('output_settings', DEFAULT_CONFIG['output_settings'])
     output_frame = ttk.Labelframe(scrollable_frame, text=app._t('output_settings_label'))

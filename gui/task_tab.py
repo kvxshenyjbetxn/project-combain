@@ -236,5 +236,5 @@ def create_task_tab(notebook, app):
     app.update_queue_display()
 
     # --- Контейнер для галереї контролю зображень ---
-    app.chain_image_gallery_frame = ttk.Labelframe(app.chain_scrollable_frame, text="Галерея Контролю Зображень")
+    app.chain_image_gallery_frame = ttk.Labelframe(app.chain_scrollable_frame, text=app._t('image_control_gallery_label'))
     # app.chain_image_gallery_frame.pack(fill='x', expand=True, padx=10, pady=10) # Покажемо пізніше

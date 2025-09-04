@@ -25,16 +25,11 @@ import queue
 import math
 
 # --- Нові імпорти для галереї ---
-try:
-    from PIL import Image, ImageTk
-except ImportError:
-    messagebox.showerror(
-        "Відсутня бібліотека",
-        "Для роботи галереї зображень потрібна бібліотека 'Pillow'.\n"
-        "Будь ласка, встановіть її командою:\n\n"
-        "pip install Pillow"
-    )
-    sys.exit(1)
+from PIL import Image, ImageTk
+
+# --- Нові залежності, потрібні для монтажу та рерайту ---
+import whisper
+import ffmpeg
 
 #імпорти всіх api
 from api.elevenlabs_api import ElevenLabsAPI
@@ -81,30 +76,6 @@ from utils import (
     suppress_stdout_stderr
 )
 
-
-# --- Нові залежності, потрібні для монтажу та рерайту ---
-try:
-    import whisper
-    import ffmpeg
-except ImportError:
-    messagebox.showerror(
-        "Відсутні бібліотеки",
-        "Для роботи функцій монтажу потрібні бібліотеки 'openai-whisper' та 'ffmpeg-python'.\n"
-        "Будь ласка, встановіть їх командою:\n\n"
-        "pip install -U openai-whisper ffmpeg-python"
-    )
-    sys.exit(1)
-
-# --- Перевірка наявності yt-dlp для рерайту ---
-try:
-    subprocess.run(['yt-dlp', '--version'], check=True, capture_output=True)
-except (subprocess.CalledProcessError, FileNotFoundError):
-    messagebox.showerror(
-        "Відсутня програма",
-        "Для роботи функцій рерайту потрібна утиліта 'yt-dlp'.\n"
-        "Будь ласка, встановіть її згідно з інструкціями на офіційному сайті."
-    )
-
 # --- Налаштування логування ---
 logger = logging.getLogger("TranslationApp")
 
@@ -141,7 +112,7 @@ class CustomAskStringDialog(tk.Toplevel):
 
     def buttonbox(self):
         box = ttk.Frame(self)
-        ok_button = ttk.Button(box, text="OK", width=10, command=self.ok, bootstyle="success")
+        ok_button = ttk.Button(box, text=self.app._t('ok_button'), width=10, command=self.ok, bootstyle="success")
         ok_button.pack(side=tk.LEFT, padx=5, pady=5)
         cancel_button = ttk.Button(box, text=self.app._t('cancel_button'), width=10, command=self.cancel, bootstyle="secondary")
         cancel_button.pack(side=tk.LEFT, padx=5, pady=5)
@@ -311,9 +282,38 @@ class AdvancedRegenerateDialog(tk.Toplevel):
 
 # --- Основна логіка програми ---
 class TranslationApp:
+    def _check_dependencies(self):
+        """Перевіряє наявність всіх необхідних бібліотек перед запуском."""
+        try:
+            from PIL import Image, ImageTk
+        except ImportError:
+            messagebox.showerror(self._t('missing_library_title'), self._t('pillow_missing_message'))
+            sys.exit(1)
+        
+        try:
+            import whisper
+            import ffmpeg
+        except ImportError:
+            messagebox.showerror(self._t('missing_library_title'), self._t('whisper_ffmpeg_missing_message'))
+            sys.exit(1)
+
+        try:
+            subprocess.run(['yt-dlp', '--version'], check=True, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            messagebox.showerror(self._t('missing_program_title'), self._t('yt-dlp_missing_message'))
+            sys.exit(1)
+
+
     def __init__(self, root, config):
         self.root = root
         self.config = config
+        self.translations = load_translations()
+        self.lang = self.config.get("ui_settings", {}).get("language", "ua")
+        
+        # Спочатку перевіряємо залежності, потім продовжуємо
+        self._check_dependencies()
+
+        self.log_context = threading.local()
         self.translations = load_translations()
         self.lang = self.config.get("ui_settings", {}).get("language", "ua")
         self.log_context = threading.local()
@@ -614,7 +614,7 @@ class TranslationApp:
         self.image_gallery_frame = ttk.Frame(self.root)
         # self.image_gallery_frame.pack(fill='both', expand=True, padx=10, pady=10) # Ми покажемо його пізніше
 
-        self.continue_button = ttk.Button(self.image_gallery_frame, text="Продовжити", command=self.continue_processing_after_image_control, bootstyle="success")
+        self.continue_button = ttk.Button(self.image_gallery_frame, text=self._t('continue_button'), command=self.continue_processing_after_image_control, bootstyle="success")
         # self.continue_button.pack(pady=10) # Також покажемо пізніше
 
     def add_to_queue(self, silent=False):
@@ -878,7 +878,7 @@ class TranslationApp:
 
         # Створюємо кнопку "Продовжити", тільки якщо опція паузи увімкнена
         if self.config.get("ui_settings", {}).get("image_control_enabled", False):
-            self.continue_button = ttk.Button(gallery_parent_frame, text="Продовжити монтаж", command=self.continue_processing_after_image_control, bootstyle="success")
+            self.continue_button = ttk.Button(gallery_parent_frame, text=self._t('continue_montage_button'), command=self.continue_processing_after_image_control, bootstyle="success")
             self.continue_button.pack(pady=10, side='bottom')
             
         self.image_control_active.clear()
@@ -1035,14 +1035,15 @@ class TranslationApp:
                     self.task_completion_status[task_key] = {
                         "task_name": task.get('task_name'),
                         "steps": {self._t('step_name_' + step_name): "⚪️" for step_name, enabled in task['steps'][lang_code].items() if enabled},
-                        "images_generated": 0 # Додаємо лічильник для зображень
+                        "images_generated": 0, # Лічильник успішних зображень
+                        "total_images": 0      # Загальна кількість зображень для генерації
                     }
 
             processing_data = {}
 
             # --- ЕТАП 0: (ТІЛЬКИ ДЛЯ РЕРАЙТУ) ТРАНСКРИПЦІЯ ---
             if is_rewrite:
-                self.update_progress("Етап 0: Транскрипція локальних файлів...")
+                self.update_progress(self._t('phase_0_transcription'))
                 logger.info("Гібридний режим -> Етап 0: Послідовна транскрипція локальних файлів.")
                 
                 transcribed_texts = {}
@@ -1084,7 +1085,7 @@ class TranslationApp:
 
 
             # --- ЕТАП 1: ПАРАЛЕЛЬНА ОБРОБКА ТЕКСТУ ---
-            self.update_progress("Етап 1: Обробка тексту...")
+            self.update_progress(self._t('phase_1_text_processing'))
             logger.info(f"Гібридний режим -> Етап 1: Паралельна обробка тексту для {len(queue_to_process)} завдань.")
             
             with concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
@@ -1109,27 +1110,29 @@ class TranslationApp:
             
             # --- ОНОВЛЕНИЙ БЛОК ПІСЛЯ ОБРОБКИ ТЕКСТУ ---
             for task_key, data in processing_data.items():
-                if data.get('text_results'):
-                    task_idx_str, lang_code = task_key
-                    status_key = f"{task_idx_str}_{lang_code}"
-                    if status_key in self.task_completion_status:
+                task_idx_str, lang_code = task_key
+                status_key = f"{task_idx_str}_{lang_code}"
+
+                if status_key in self.task_completion_status:
+                    if data.get('text_results'):
                         # Відмічаємо успішність текстових етапів
                         steps_to_mark = ['translate', 'rewrite', 'cta', 'gen_prompts']
                         for step in steps_to_mark:
                             step_name_key = self._t('step_name_' + step)
                             if step_name_key in self.task_completion_status[status_key]['steps']:
                                 self.task_completion_status[status_key]['steps'][step_name_key] = "✅"
-                else:
-                    # Якщо текстовий етап провалився, відмічаємо всі наступні як провалені
-                    task_idx_str, lang_code = task_key
-                    status_key = f"{task_idx_str}_{lang_code}"
-                    if status_key in self.task_completion_status:
-                         for step_name in self.task_completion_status[status_key]['steps']:
+                        
+                        # Зберігаємо загальну кількість запланованих зображень
+                        num_prompts = len(data['text_results'].get("prompts", []))
+                        self.task_completion_status[status_key]["total_images"] = num_prompts
+                    else:
+                        # Якщо текстовий етап провалився, відмічаємо всі наступні як провалені
+                        for step_name in self.task_completion_status[status_key]['steps']:
                             self.task_completion_status[status_key]['steps'][step_name] = "❌"
 
 
             # --- ЕТАП 2: ОДНОЧАСНА ГЕНЕРАЦІЯ МЕДІА ---
-            self.update_progress("Етап 2: Генерація медіафайлів...")
+            self.update_progress(self._t('phase_2_media_generation'))
             logger.info("Гібридний режим -> Етап 2: Одночасна генерація медіа.")
             
             self.root.after(0, self.setup_empty_gallery, queue_type, queue_to_process)
@@ -1157,7 +1160,7 @@ class TranslationApp:
             
             # --- ЕТАП 3: ОПЦІОНАЛЬНА ПАУЗА ---
             if self.config.get("ui_settings", {}).get("image_control_enabled", False) and should_gen_images:
-                self.update_progress("Етап 3: Очікування налаштування зображень...")
+                self.update_progress(self._t('phase_3_image_control'))
                 logger.info("Гібридний режим -> Етап 3: Пауза для налаштування зображень користувачем.")
                 
                 # Надсилаємо повідомлення в Telegram
@@ -1173,7 +1176,7 @@ class TranslationApp:
                 logger.info("Гібридний режим -> Етап 3: Пауза вимкнена або не потрібна, перехід до монтажу.")
 
             # --- ЕТАП 4: ФІНАЛЬНИЙ МОНТАЖ ТА ЗВІТИ ПО МОВАХ ---
-            self.update_progress("Етап 4: Фінальний монтаж відео...")
+            self.update_progress(self._t('phase_4_final_montage'))
             logger.info("Гібридний режим -> Етап 4: Початок фінального монтажу та звітів по мовах.")
 
             for task_key, data in sorted(processing_data.items()):
@@ -1755,10 +1758,27 @@ class TranslationApp:
                 escaped_step_name = self._escape_markdown(step_name)
                 
                 # Спеціальна логіка для кроку генерації зображень
-                if step_name == self._t('step_name_gen_images') and result_icon == "✅":
-                    images_count = status.get("images_generated", 0)
-                    count_text = self._escape_markdown(f"({images_count} шт.)")
-                    report_lines.append(f"• {result_icon} {escaped_step_name} *{count_text}*")
+                if step_name == self._t('step_name_gen_images'):
+                    images_generated = status.get("images_generated", 0)
+                    total_images = status.get("total_images", 0)
+                    count_text = self._escape_markdown(f"({images_generated}/{total_images} шт.)")
+                    
+                    # Визначаємо іконку на основі реальних даних, а не попередньо встановленої
+                    current_icon = result_icon
+                    if total_images > 0: # Якщо зображення планувались
+                        if images_generated == total_images:
+                            current_icon = "✅"
+                        elif images_generated > 0:
+                            current_icon = "⚠️" # Частково виконано
+                        else:
+                            current_icon = "❌"
+                    
+                    # Якщо крок був пропущений (total_images == 0), іконка залишиться "⚪️"
+                    if current_icon == "❌":
+                        report_lines.append(f"• {current_icon} ~{escaped_step_name}~ *{count_text}*")
+                    else:
+                        report_lines.append(f"• {current_icon} {escaped_step_name} *{count_text}*")
+                
                 elif result_icon == "❌":
                     report_lines.append(f"• {result_icon} ~{escaped_step_name}~")
                 elif result_icon == "⚪️":
@@ -2189,12 +2209,12 @@ class TranslationApp:
         
         def preview_thread():
             try:
-                self.root.after(0, lambda: self.preview_button.config(state="disabled", text="Генерація..."))
+                self.root.after(0, lambda: self.preview_button.config(state="disabled", text=self._t('generating_label', default="Генерація..."))) # Припускаємо, що ключ 'generating_label' буде додано
                 
                 preview_folder = os.path.join(APP_BASE_PATH, "preview")
                 if not os.path.exists(preview_folder):
                     os.makedirs(preview_folder)
-                    messagebox.showinfo("Папка Preview", f"Створено папку 'preview'. Будь ласка, покладіть туди 3 картинки (image_1.jpg, image_2.jpg, image_3.jpg), audio.mp3 та subtitles.ass")
+                    messagebox.showinfo(self._t('preview_folder_title'), self._t('preview_folder_message'))
                     return
 
                 image_paths = [os.path.join(preview_folder, f"image_{i}.jpg") for i in range(1, 4)]
@@ -2206,7 +2226,7 @@ class TranslationApp:
 
                 missing_files = [p for p in image_paths + [audio_path, subs_path] if not os.path.exists(p)]
                 if missing_files:
-                    messagebox.showerror("Помилка", "Не знайдено файли для попереднього перегляду:\n" + "\n".join(os.path.basename(p) for p in missing_files))
+                    messagebox.showerror(self._t('error_title'), self._t('preview_files_not_found_error', files="\n".join(os.path.basename(p) for p in missing_files)))
                     return
 
                 current_montage_config = {
@@ -2246,7 +2266,7 @@ class TranslationApp:
                     else:
                         subprocess.run(["xdg-open", preview_output_path])
                 else:
-                    messagebox.showerror("Помилка", "Не вдалося створити відео для попереднього перегляду. Перевірте лог.")
+                    messagebox.showerror(self._t('error_title'), self._t('preview_video_creation_error'))
             
             finally:
                 # --- ВИДАЛЕНО ЛОГІКУ ВИДАЛЕННЯ ---
@@ -2370,10 +2390,10 @@ class TranslationApp:
                 widget.destroy()
 
         if is_loading:
-            loading_label = ttk.Label(frame, text="🔄\nЗавантаження...")
+            loading_label = ttk.Label(frame, text=self._t('loading_label_text'))
             loading_label.pack(pady=5, side='top', expand=True, fill='both')
         elif is_error:
-            error_label = ttk.Label(frame, text="❌\nПомилка", bootstyle="danger")
+            error_label = ttk.Label(frame, text=self._t('error_label_text'), bootstyle="danger")
             error_label.pack(pady=5, side='top', expand=True, fill='both')
         else:
             try:
@@ -2387,7 +2407,7 @@ class TranslationApp:
                 img_label.pack(pady=5, side='top', expand=True, fill='both')
             except Exception as e:
                 logger.error(f"Could not reload image {image_path}: {e}")
-                error_label = ttk.Label(frame, text=f"❌\nНе вдалося\nзавантажити")
+                error_label = ttk.Label(frame, text=self._t('error_loading_label_text'))
                 error_label.pack(pady=5, side='top', expand=True, fill='both')
 
     def _sequential_image_master(self, processing_data, queue_to_process):
@@ -2603,13 +2623,17 @@ class TranslationApp:
         messagebox.showinfo(self._t('info_title'), self._t('info_restart_required'))
 
     def on_theme_changed(self, event=None):
-        theme_map = {"Current (Darkly)": "darkly", "Pure Black": "cyborg", "White": "litera"}
+        theme_map = {
+            self._t('theme_darkly'): "darkly",
+            self._t('theme_cyborg'): "cyborg",
+            self._t('theme_litera'): "litera"
+        }
         selected_display_name = self.theme_var.get()
         selected_theme = theme_map.get(selected_display_name, "darkly")
         self.config['ui_settings']['theme'] = selected_theme
         save_config(self.config)
         self.apply_theme_dynamically(selected_theme)
-        messagebox.showinfo(self._t('info_title'), self._t('theme_changed_successfully'))
+        messagebox.showinfo(self._t('info_message_box_title'), self._t('theme_changed_successfully'))
 
     def apply_theme_dynamically(self, theme_name):
         try:
@@ -2619,7 +2643,7 @@ class TranslationApp:
             logger.info(f"Theme changed dynamically to: {theme_name}")
         except Exception as e:
             logger.error(f"Error applying theme {theme_name}: {e}")
-            messagebox.showerror("Помилка", f"Не вдалося застосувати тему: {e}")
+            messagebox.showerror(self._t('error_title'), self._t('error_applying_theme', e=e))
 
     def refresh_widget_colors(self):
         try:
@@ -3040,7 +3064,7 @@ class TranslationApp:
         self.log_context.worker_id = f'Chunk {chunk_index}/{total_chunks}'
         try:
             tts_service = lang_config.get("tts_service", "elevenlabs")
-            logger.info(f"Starting task with {tts_service}")
+            logger.info(f"Starting audio generation task with {tts_service}")
             
             if tts_service == "elevenlabs":
                 task_id = self.el_api.create_audio_task(text_chunk, lang_config.get("elevenlabs_template_uuid"))
@@ -3107,7 +3131,7 @@ class TranslationApp:
         subs_chunk_paths = []
         total_chunks = len(audio_chunk_paths)
         for i, audio_path in enumerate(audio_chunk_paths):
-            self.update_progress(f"Транскрипція шматка {i+1}/{total_chunks}...")
+            self.update_progress(self._t('transcribing_chunk', current=i + 1, total=total_chunks))
             subs_path = os.path.join(subs_chunk_dir, f"subs_chunk_{i}.ass")
             if self.montage_api.create_subtitles(audio_path, subs_path):
                 subs_chunk_paths.append(subs_path)
@@ -3131,9 +3155,9 @@ class TranslationApp:
             if hasattr(self.log_context, 'parallel_task'): del self.log_context.parallel_task
             if hasattr(self.log_context, 'worker_id'): del self.log_context.worker_id
 
-    def _prepare_parallel_audio_chunks(self, text_to_process, lang_config, lang_code, lang_output_path, num_parallel_chunks):
+    def _prepare_parallel_audio_chunks(self, text_to_process, lang_config, lang_code, temp_dir, num_parallel_chunks):
         tts_service = lang_config.get("tts_service", "elevenlabs")
-        temp_audio_dir = os.path.join(lang_output_path, "temp_audio_chunks")
+        temp_audio_dir = os.path.join(temp_dir, "audio_chunks")
         os.makedirs(temp_audio_dir, exist_ok=True)
         logger.info(f"Preparing audio chunks for {lang_code} using {tts_service}...")
 
@@ -3193,7 +3217,7 @@ class TranslationApp:
         video_folder = os.path.join(APP_BASE_PATH, "video")
         if not os.path.isdir(video_folder):
             os.makedirs(video_folder)
-            messagebox.showinfo("Папка створена", "Папку 'video' створено. Будь ласка, покладіть туди ваші .mp3 файли.")
+            messagebox.showinfo(self._t('folder_created_title'), self._t('folder_created_message'))
             return
 
         selected_langs = [code for code, var in self.rewrite_lang_checkbuttons.items() if var.get()]
@@ -3212,7 +3236,7 @@ class TranslationApp:
         for filename in os.listdir(video_folder):
             if filename.lower().endswith(".mp3") and filename not in self.processed_links:
                 file_path = os.path.join(video_folder, filename)
-                task_name = f"Rewrite: {os.path.splitext(filename)[0]}"
+                task_name = f"{self._t('rewrite_task_prefix')}: {os.path.splitext(filename)[0]}"
                 steps = {lang: {key: var.get() for key, var in self.rewrite_lang_step_vars[lang].items()} for lang in selected_langs}
 
                 task_config = {
@@ -3228,9 +3252,9 @@ class TranslationApp:
 
         if new_files_found > 0:
             self.update_rewrite_queue_display()
-            messagebox.showinfo(self._t('queue_title'), f"Додано {new_files_found} нових завдань до черги.")
+            messagebox.showinfo(self._t('queue_title'), self._t('info_new_tasks_added', count=new_files_found))
         else:
-            messagebox.showinfo(self._t('queue_title'), "Нових файлів для обробки не знайдено.")
+            messagebox.showinfo(self._t('queue_title'), self._t('info_no_new_files'))
 
     def update_rewrite_queue_display(self):
         if not hasattr(self, 'rewrite_queue_tree'): return

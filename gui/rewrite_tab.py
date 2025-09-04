@@ -65,9 +65,9 @@ def create_rewrite_tab(notebook, app):
     app.rewrite_canvas, app.rewrite_scrollable_frame = app._create_scrollable_tab(app.rewrite_frame)
     
     # Інформаційна рамка замість поля для вводу
-    info_frame = ttk.Labelframe(app.rewrite_scrollable_frame, text="Робота з локальними аудіофайлами")
+    info_frame = ttk.Labelframe(app.rewrite_scrollable_frame, text=app._t('local_audio_work_label'))
     info_frame.pack(fill='x', expand=True, padx=10, pady=5)
-    ttk.Label(info_frame, text="1. Помістіть ваші .mp3 файли в папку 'video' поруч з програмою.\n2. Оберіть мови та налаштування нижче.\n3. Натисніть 'Додати в чергу', щоб знайти нові файли.", justify='left').pack(padx=5, pady=5)
+    ttk.Label(info_frame, text=app._t('rewrite_instructions_label'), justify='left').pack(padx=5, pady=5)
     
     options_frame = ttk.Frame(app.rewrite_scrollable_frame)
     options_frame.pack(fill='x', padx=10, pady=5)
@@ -165,5 +165,5 @@ def create_rewrite_tab(notebook, app):
     app.update_rewrite_queue_display()
 
     # --- Контейнер для галереї контролю зображень ---
-    app.rewrite_image_gallery_frame = ttk.Labelframe(app.rewrite_scrollable_frame, text="Галерея Контролю Зображень")
+    app.rewrite_image_gallery_frame = ttk.Labelframe(app.rewrite_scrollable_frame, text=app._t('image_control_gallery_label'))
     # app.rewrite_image_gallery_frame.pack(fill='x', expand=True, padx=10, pady=10) # Покажемо пізніше

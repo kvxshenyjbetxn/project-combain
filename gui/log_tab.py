@@ -14,7 +14,7 @@ def create_log_tab(notebook, app):
     'notebook' - це головний записник, куди буде додано вкладку.
     'app' - це посилання на головний клас програми для доступу до його функцій та змінних.
     """
-    main_log_frame = ttk.Labelframe(app.log_frame, text="Основний лог (Послідовні операції)")
+    main_log_frame = ttk.Labelframe(app.log_frame, text=app._t('main_log_label'))
     main_log_frame.pack(fill='both', expand=True, padx=5, pady=(5, 2))
 
     app.log_text, text_container_widget = app._create_scrolled_text(main_log_frame, state='disabled', font=("Courier New", 9))
@@ -46,7 +46,7 @@ def create_log_tab(notebook, app):
     switch_service_button_log.pack(side='left', padx=5)
     app.switch_service_buttons.append(switch_service_button_log)
 
-    parallel_container_frame = ttk.Labelframe(app.log_frame, text="Лог паралельних завдань")
+    parallel_container_frame = ttk.Labelframe(app.log_frame, text=app._t('parallel_log_label'))
     parallel_container_frame.pack(fill='both', expand=True, padx=5, pady=(2, 5))
 
     num_chunks = app.config.get('parallel_processing', {}).get('num_chunks', 3)
@@ -60,7 +60,7 @@ def create_log_tab(notebook, app):
         
         parallel_container_frame.grid_rowconfigure(0, weight=1)
 
-        ttk.Label(chunk_frame, text=f"Потік {i+1}", bootstyle="secondary").pack(fill='x')
+        ttk.Label(chunk_frame, text=app._t('thread_label', thread_num=i + 1), bootstyle="secondary").pack(fill='x')
         
         log_widget, text_container_widget = app._create_scrolled_text(chunk_frame, state='disabled', font=("Courier New", 8))
         text_container_widget.pack(fill='both', expand=True)
@@ -139,4 +139,4 @@ def create_log_tab(notebook, app):
         formatter = logging.Formatter('%(message)s')
         app.gui_log_handler.setFormatter(formatter)
         logger.addHandler(app.gui_log_handler)
-        logger.info("Програму запущено. Логування в інтерфейс активовано.")
+        logger.info(app._t('log_program_started'))
