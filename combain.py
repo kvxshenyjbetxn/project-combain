@@ -1,5 +1,3 @@
-#combain-v72-test-speechify
-
 import tkinter as tk
 from tkinter import ttk as classic_ttk, scrolledtext, messagebox, filedialog, simpledialog
 import ttkbootstrap as ttk
@@ -747,32 +745,27 @@ class TranslationApp:
         prompts = data['text_results']['prompts']
         images_folder = data['text_results']['images_folder']
         lang_name = task_key[1].upper()
-        
+
         with self.image_api_lock:
             if self.active_image_api is None:
                 self.active_image_api = self.config.get("ui_settings", {}).get("image_generation_api", "pollinations")
 
         logger.info(f"Starting generation of {len(prompts)} images for {lang_name} using {self.active_image_api.capitalize()}.")
-        
+
         all_successful = True
         for i, prompt in enumerate(prompts):
-            if self.skip_image_event.is_set():
-                logger.warning("Процес генерації зображень для цього завдання був пропущений.")
-                all_successful = False
-                break
-
             if not self._check_app_state():
                 all_successful = False
                 break
-            
+
             with self.image_api_lock:
                 current_api_for_generation = self.active_image_api
-            
+
             progress_text = f"Завд.{task_num}/{total_tasks} | {lang_name} - [{current_api_for_generation.capitalize()}] {self._t('step_gen_images')} {i+1}/{len(prompts)}..."
             self.update_progress(progress_text)
-            
+
             image_path = os.path.join(images_folder, f"image_{i+1:03d}.jpg")
-            
+
             success = False
             if current_api_for_generation == "pollinations":
                 success = self.poll_api.generate_image(prompt, image_path)
@@ -788,10 +781,10 @@ class TranslationApp:
                 if status_key in self.task_completion_status:
                     self.task_completion_status[status_key]["images_generated"] += 1
             else:
-                logger.error(f"[{current_api_for_generation.capitalize()}] Failed to generate image {i+1}/{len(prompts)}.")
+                # Цей лог тепер також буде спрацьовувати при пропуску
+                logger.error(f"[{current_api_for_generation.capitalize()}] Failed to generate or skipped image {i+1}/{len(prompts)}.")
                 all_successful = False
-        
-        self.skip_image_event.clear()
+
         # Кнопка пропуску вимкнеться автоматично, коли почнеться наступний етап (не генерація зображень)
         return all_successful
 
@@ -1082,6 +1075,14 @@ class TranslationApp:
                     if task['mp3_path'] in transcribed_texts:
                         task['transcribed_text'] = transcribed_texts[task['mp3_path']]['text']
                         task['video_title'] = transcribed_texts[task['mp3_path']]['title']
+                        
+                        # Оновлюємо статус транскрипції для всіх мов у цьому завданні
+                        task_idx_str = task['task_index']
+                        step_name_key = self._t('step_name_transcribe')
+                        for lang_code in task['selected_langs']:
+                            status_key = f"{task_idx_str}_{lang_code}"
+                            if status_key in self.task_completion_status and step_name_key in self.task_completion_status[status_key]['steps']:
+                                self.task_completion_status[status_key]['steps'][step_name_key] = "✅"
 
 
             # --- ЕТАП 1: ПАРАЛЕЛЬНА ОБРОБКА ТЕКСТУ ---

@@ -1,0 +1,7 @@
+ttkbootstrap
+requests
+Pillow
+openai-whisper
+ffmpeg-python
+numpy
+yt-dlp

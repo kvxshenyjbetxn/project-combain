@@ -23,7 +23,6 @@ def add_rewrite_lang_widgets(app, lang_code):
     steps_frame.pack(side='left', fill='x', expand=True)
 
     app.rewrite_lang_step_vars[lang_code] = {
-        'download': tk.BooleanVar(value=True),
         'transcribe': tk.BooleanVar(value=True),
         'rewrite': tk.BooleanVar(value=True),
         'cta': tk.BooleanVar(value=True),
@@ -35,7 +34,7 @@ def add_rewrite_lang_widgets(app, lang_code):
     }
     
     steps = {
-        'download': app._t('step_download'), 'transcribe': app._t('step_transcribe'),
+        'transcribe': app._t('step_transcribe'),
         'rewrite': app._t('step_rewrite'), 'cta': app._t('step_cta'), 
         'gen_prompts': app._t('step_gen_prompts'), 'gen_images': app._t('step_gen_images'), 
         'audio': app._t('step_audio'), 'create_subtitles': app._t('step_create_subtitles'),

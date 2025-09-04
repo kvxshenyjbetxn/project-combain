@@ -75,6 +75,7 @@ class PollinationsAPI:
                 # Перевірка на пропуск користувачем на початку кожної ітерації
                 if self.app.skip_image_event.is_set():
                     logger.warning("Pollinations -> Генерацію ОДНОГО зображення пропущено користувачем.")
+                    self.app.skip_image_event.clear() # Очищаємо прапорець одразу
                     return False # Повертаємо False, щоб перейти до наступного зображення
 
                 logger.info(f"Pollinations -> Генерація зображення (спроба #{attempt})...")
@@ -108,6 +109,7 @@ class PollinationsAPI:
             # Очікування перед наступною спробою (може бути перерване командою пропуску)
             if self.app.skip_image_event.wait(timeout=retry_delay):
                 logger.warning("Pollinations -> Генерацію ОДНОГО зображення пропущено користувачем під час очікування.")
+                self.app.skip_image_event.clear() # Очищаємо прапорець тут також
                 return False # Повертаємо False, щоб перейти до наступного зображення
 
             attempt += 1
