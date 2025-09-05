@@ -354,9 +354,13 @@ class TranslationApp:
         self.last_telegram_update_id = 0
         
         self.skip_image_event = threading.Event()
+        self.regenerate_alt_service_event = threading.Event()
         self.skip_image_buttons = []
         self.switch_service_buttons = []
-        self.active_image_api = None
+        self.regenerate_alt_buttons = []
+        self.image_api_selectors = []
+        self.active_image_api_var = tk.StringVar(value=self.config.get("ui_settings", {}).get("image_generation_api", "pollinations"))
+        self.active_image_api = self.active_image_api_var.get()
         self.image_api_lock = threading.Lock()
 
         self.lang_output_path_vars = {}
@@ -381,6 +385,14 @@ class TranslationApp:
         self.image_gallery_frame = None
         self.continue_button = None
         self.image_control_active = threading.Event()
+        
+        # Словники для відповідності тем
+        self.theme_map_to_display = {
+            "darkly": self._t('theme_darkly'), 
+            "cyborg": self._t('theme_cyborg'), 
+            "litera": self._t('theme_litera')
+        }
+        self.theme_map_to_internal = {v: k for k, v in self.theme_map_to_display.items()}
 
 
         self.setup_gui()
@@ -415,7 +427,21 @@ class TranslationApp:
     def _on_skip_image_click(self):
         logger.warning("Користувач натиснув 'Пропустити зображення'.")
         self.skip_image_event.set()
-        self.disable_skip_button()
+        self._update_button_states(is_processing=True, is_image_stuck=False)
+
+    def _on_regenerate_alt_click(self):
+        logger.warning("Користувач натиснув 'Спробувати іншим сервісом'.")
+        self.regenerate_alt_service_event.set()
+        self._update_button_states(is_processing=True, is_image_stuck=False)
+
+    def _on_image_api_select(self, event=None):
+        """Синхронізує вибір API на всіх вкладках та зберігає налаштування."""
+        new_api = self.active_image_api_var.get()
+        self.config["ui_settings"]["image_generation_api"] = new_api
+        self.active_image_api = new_api
+        logger.info(f"Default image generation API set to: {new_api}")
+        # Синхронізація не потрібна, оскільки всі вони використовують одну й ту ж змінну
+        save_config(self.config) # Зберігаємо зміну одразу
 
     def _on_switch_service_click(self):
         with self.image_api_lock:
@@ -428,7 +454,7 @@ class TranslationApp:
     def _update_button_states(self, is_processing=False, is_image_stuck=False):
         """Централізовано оновлює стан кнопок управління."""
         switch_state = "normal" if is_processing else "disabled"
-        skip_state = "normal" if is_image_stuck else "disabled"
+        stuck_state = "normal" if is_image_stuck else "disabled"
 
         for button in self.switch_service_buttons:
             if button:
@@ -436,7 +462,11 @@ class TranslationApp:
         
         for button in self.skip_image_buttons:
             if button:
-                self.root.after(0, lambda b=button, s=skip_state: b.config(state=s))
+                self.root.after(0, lambda b=button, s=stuck_state: b.config(state=s))
+
+        for button in self.regenerate_alt_buttons:
+            if button:
+                self.root.after(0, lambda b=button, s=stuck_state: b.config(state=s))
 
     def enable_skip_button(self):
         # Ця функція тепер вмикає ТІЛЬКИ кнопку пропуску
@@ -748,16 +778,23 @@ class TranslationApp:
 
         with self.image_api_lock:
             if self.active_image_api is None:
-                self.active_image_api = self.config.get("ui_settings", {}).get("image_generation_api", "pollinations")
+                self.active_image_api = self.active_image_api_var.get()
 
         logger.info(f"Starting generation of {len(prompts)} images for {lang_name} using {self.active_image_api.capitalize()}.")
 
+        auto_switch_enabled = self.config.get("ui_settings", {}).get("auto_switch_service_on_fail", False)
+        retry_limit_for_switch = self.config.get("ui_settings", {}).get("auto_switch_retry_limit", 10)
+        
+        consecutive_failures = 0
         all_successful = True
-        for i, prompt in enumerate(prompts):
+
+        i = 0
+        while i < len(prompts):
             if not self._check_app_state():
                 all_successful = False
                 break
 
+            prompt = prompts[i]
             with self.image_api_lock:
                 current_api_for_generation = self.active_image_api
 
@@ -766,6 +803,43 @@ class TranslationApp:
 
             image_path = os.path.join(images_folder, f"image_{i+1:03d}.jpg")
 
+            # --- ОСНОВНА ЛОГІКА ОБРОБКИ ПОДІЙ ---
+            # Перевіряємо, чи не було натиснуто одну з кнопок
+            if self.skip_image_event.is_set():
+                self.skip_image_event.clear()
+                logger.warning(f"Skipping image {i+1} by user command.")
+                i += 1
+                continue
+
+            if self.regenerate_alt_service_event.is_set():
+                self.regenerate_alt_service_event.clear()
+                logger.warning(f"Attempting to regenerate image {i+1} with alternate service.")
+                with self.image_api_lock:
+                    alt_service = "recraft" if self.active_image_api == "pollinations" else "pollinations"
+                
+                success_alt = False
+                if alt_service == "pollinations":
+                    success_alt = self.poll_api.generate_image(prompt, image_path)
+                elif alt_service == "recraft":
+                    success_alt, _ = self.recraft_api.generate_image(prompt, image_path)
+
+                if success_alt:
+                    logger.info(f"[{alt_service.capitalize()}] Successfully regenerated image {i+1} with alternate service.")
+                    # Логіка успішної генерації, як у звичайному випадку
+                    consecutive_failures = 0
+                    self.image_prompts_map[image_path] = prompt
+                    self.root.after(0, self._add_image_to_gallery, image_path, task_key)
+                    status_key = f"{task_key[0]}_{task_key[1]}"
+                    if status_key in self.task_completion_status:
+                        self.task_completion_status[status_key]["images_generated"] += 1
+                else:
+                    logger.error(f"Alternate service [{alt_service.capitalize()}] also failed to generate image {i+1}.")
+                    all_successful = False
+                
+                i += 1 # Переходимо до наступного зображення незалежно від результату
+                continue
+            
+            # --- СТАНДАРТНА ГЕНЕРАЦІЯ ---
             success = False
             if current_api_for_generation == "pollinations":
                 success = self.poll_api.generate_image(prompt, image_path)
@@ -773,19 +847,57 @@ class TranslationApp:
                 success, _ = self.recraft_api.generate_image(prompt, image_path)
 
             if success:
+                consecutive_failures = 0 
                 logger.info(f"[{current_api_for_generation.capitalize()}] Successfully generated image {i+1}/{len(prompts)}.")
                 self.image_prompts_map[image_path] = prompt
                 self.root.after(0, self._add_image_to_gallery, image_path, task_key)
-                # Оновлюємо лічильник успішних зображень
                 status_key = f"{task_key[0]}_{task_key[1]}"
                 if status_key in self.task_completion_status:
                     self.task_completion_status[status_key]["images_generated"] += 1
+                i += 1 
             else:
-                # Цей лог тепер також буде спрацьовувати при пропуску
-                logger.error(f"[{current_api_for_generation.capitalize()}] Failed to generate or skipped image {i+1}/{len(prompts)}.")
-                all_successful = False
+                consecutive_failures += 1
+                logger.error(f"[{current_api_for_generation.capitalize()}] Failed to generate image {i+1}. Consecutive failures: {consecutive_failures}.")
+                
+                # Логіка автоматичного перемикання
+                if auto_switch_enabled and consecutive_failures >= retry_limit_for_switch:
+                    logger.warning(f"Reached {consecutive_failures} consecutive failures. Triggering automatic service switch.")
+                    with self.image_api_lock:
+                        new_service = "recraft" if self.active_image_api == "pollinations" else "pollinations"
+                        self.active_image_api = new_service
+                        self.active_image_api_var.set(new_service) # Оновлюємо змінну для GUI
+                        logger.warning(f"Service automatically switched to: {self.active_image_api.capitalize()}")
+                    consecutive_failures = 0
+                    continue 
 
-        # Кнопка пропуску вимкнеться автоматично, коли почнеться наступний етап (не генерація зображень)
+                # Логіка ручного втручання
+                # Використовуємо ліміт з Pollinations як тригер для кнопок
+                manual_intervention_limit = self.config.get("pollinations", {}).get("retries", 5)
+                if consecutive_failures >= manual_intervention_limit:
+                    logger.error(f"{manual_intervention_limit} consecutive failures for one image. Activating manual controls.")
+                    self._update_button_states(is_processing=True, is_image_stuck=True)
+                    self.tg_api.send_message_with_buttons(
+                        message="❌ *Помилка генерації зображення*\n\nНе вдається згенерувати зображення\\. Процес очікує\\. Оберіть дію:",
+                        buttons=[
+                            {"text": "Пропустити", "callback_data": "skip_image_action"},
+                            {"text": "Спробувати іншим", "callback_data": "regenerate_alt_action"},
+                            {"text": "Перемкнути назавжди", "callback_data": "switch_service_action"}
+                        ]
+                    )
+                    # Чекаємо на дію користувача
+                    while not (self.skip_image_event.is_set() or self.regenerate_alt_service_event.is_set()):
+                        if not self._check_app_state(): # Дозволяє паузу/продовження під час очікування
+                            all_successful = False
+                            break
+                        time.sleep(0.5)
+                    
+                    self._update_button_states(is_processing=True, is_image_stuck=False) # Деактивуємо кнопки після дії
+                    continue # Повертаємось на початок циклу, щоб обробити подію
+                
+                # Якщо нічого не спрацювало, просто переходимо до наступного зображення
+                all_successful = False
+                i += 1
+
         return all_successful
 
     def _start_telegram_polling(self):
@@ -816,10 +928,13 @@ class TranslationApp:
                         
                         if callback_data == "skip_image_action":
                             self.root.after(0, self._on_skip_image_click)
-                            self.tg_api.answer_callback_query(query_id)
+                            self.tg_api.answer_callback_query(query_id, "Пропускаю зображення...")
                         elif callback_data == "switch_service_action":
                             self.root.after(0, self._on_switch_service_click)
-                            self.tg_api.answer_callback_query(query_id)
+                            self.tg_api.answer_callback_query(query_id, "Перемикаю сервіс...")
+                        elif callback_data == "regenerate_alt_action":
+                            self.root.after(0, self._on_regenerate_alt_click)
+                            self.tg_api.answer_callback_query(query_id, "Пробую іншим сервісом...")
                         elif callback_data == "continue_montage_action":
                             self.root.after(0, self.continue_processing_after_image_control)
                             self.tg_api.answer_callback_query(query_id)
@@ -2011,7 +2126,7 @@ class TranslationApp:
         self.config["pollinations"]["width"] = self.poll_width_var.get()
         self.config["pollinations"]["height"] = self.poll_height_var.get()
         self.config["pollinations"]["timeout"] = self.poll_timeout_var.get()
-        self.config["pollinations"]["retries"] = self.poll_retries_var.get()
+        self.config['ui_settings']['image_generation_api'] = self.image_api_var.get()
         self.config["pollinations"]["remove_logo"] = self.poll_remove_logo_var.get()
         if 'recraft' not in self.config: self.config['recraft'] = {}
         self.config['recraft']['api_key'] = self.recraft_api_key_var.get()
@@ -2040,9 +2155,9 @@ class TranslationApp:
         self.config['telegram']['api_key'] = self.tg_api_key_var.get()
         self.config['telegram']['chat_id'] = self.tg_chat_id_var.get()
         # Зберігаємо нове налаштування режиму звіту
-        display_value = app.tg_report_timing_var.get()
+        display_value = self.tg_report_timing_var.get()
         # Знаходимо ключ ('per_task' або 'per_language') за відображуваним значенням
-        internal_value = next((k for k, v in app.report_timing_display_map.items() if v == display_value), 'per_task')
+        internal_value = next((k for k, v in self.report_timing_display_map.items() if v == display_value), 'per_task')
         self.config['telegram']['report_timing'] = internal_value
         # Видаляємо збереження старих налаштувань notify_on
         if 'notify_on' in self.config['telegram']:
@@ -2079,10 +2194,14 @@ class TranslationApp:
                  self.config["rewrite_prompt_templates"][template_name] = {}
         if 'ui_settings' not in self.config: self.config['ui_settings'] = {}
         self.config['ui_settings']['image_generation_api'] = self.image_api_var.get()
-        theme_map = {"Current (Darkly)": "darkly", "Pure Black": "cyborg", "White": "litera"}
+        
         selected_display_name = self.theme_var.get()
-        self.config['ui_settings']['theme'] = theme_map.get(selected_display_name, "darkly")
+        self.config['ui_settings']['theme'] = self.theme_map_to_internal.get(selected_display_name, "darkly")
+        
         self.config['ui_settings']['image_control_enabled'] = self.image_control_var.get()
+        self.config['ui_settings']['auto_switch_service_on_fail'] = self.auto_switch_var.get()
+        self.config['ui_settings']['auto_switch_retry_limit'] = self.auto_switch_retries_var.get()
+
         save_config(self.config)
         self.or_api = OpenRouterAPI(self.config)
         self.poll_api = PollinationsAPI(self.config, self)

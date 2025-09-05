@@ -175,13 +175,7 @@ def create_api_settings_subtabs(parent_tab, app):
     poll_timeout_spinbox = ttk.Spinbox(poll_frame, from_=1, to=30, textvariable=app.poll_timeout_var, width=10)
     poll_timeout_spinbox.grid(row=4, column=1, sticky='w', padx=5, pady=5)
     add_text_widget_bindings(app, poll_timeout_spinbox)
-    
-    ttk.Label(poll_frame, text=app._t('retries_label')).grid(row=5, column=0, sticky='w', padx=5, pady=5)
-    app.poll_retries_var = tk.IntVar(value=app.config["pollinations"]["retries"])
-    poll_retries_spinbox = ttk.Spinbox(poll_frame, from_=1, to=10, textvariable=app.poll_retries_var, width=10)
-    poll_retries_spinbox.grid(row=5, column=1, sticky='w', padx=5, pady=5)
-    add_text_widget_bindings(app, poll_retries_spinbox)
-    
+
     app.poll_remove_logo_var = tk.BooleanVar(value=app.config["pollinations"]["remove_logo"])
     ttk.Checkbutton(poll_frame, variable=app.poll_remove_logo_var, text=app._t('remove_logo_label'), bootstyle="light-round-toggle").grid(row=6, column=0, sticky='w', padx=5, pady=5)
 
@@ -615,20 +609,27 @@ def create_other_settings_tab(parent_tab, app):
     add_text_widget_bindings(app, theme_combo)
     theme_combo.bind("<<ComboboxSelected>>", app.on_theme_changed)
     
-    theme_map_to_display = {
-        "darkly": app._t('theme_darkly'), 
-        "cyborg": app._t('theme_cyborg'), 
-        "litera": app._t('theme_litera')
-    }
+    theme_combo['values'] = list(app.theme_map_to_display.values())
+    
+    # Встановлюємо відображуване значення
     current_theme_key = app.config.get("ui_settings", {}).get("theme", "darkly")
-    app.theme_var.set(theme_map_to_display.get(current_theme_key, app._t('theme_darkly')))
+    display_value = app.theme_map_to_display.get(current_theme_key, app._t('theme_darkly'))
+    app.theme_var.set(display_value)
 
-    ttk.Label(general_frame, text=app._t('image_api_label')).grid(row=2, column=0, sticky='w', padx=5, pady=5)
-    app.image_api_var = tk.StringVar(value=app.config.get("ui_settings", {}).get("image_generation_api", "pollinations"))
-    image_api_combo = ttk.Combobox(general_frame, textvariable=app.image_api_var, values=["pollinations", "recraft"], state="readonly")
-    image_api_combo.grid(row=2, column=1, sticky='ew', padx=5, pady=5)
     app.image_control_var = tk.BooleanVar(value=app.config.get("ui_settings", {}).get("image_control_enabled", False))
     ttk.Checkbutton(general_frame, variable=app.image_control_var, text=app._t('image_control_label')).grid(row=3, column=0, columnspan=2, sticky='w', padx=5, pady=5)
+
+    # --- Нові налаштування авто-перемикання ---
+    auto_switch_frame = ttk.Frame(general_frame)
+    auto_switch_frame.grid(row=4, column=0, columnspan=3, sticky='w', padx=5, pady=5)
+
+    app.auto_switch_var = tk.BooleanVar(value=app.config.get("ui_settings", {}).get("auto_switch_service_on_fail", False))
+    ttk.Checkbutton(auto_switch_frame, variable=app.auto_switch_var, text=app._t('auto_switch_service_label')).pack(side='left', anchor='w')
+    
+    ttk.Label(auto_switch_frame, text=app._t('retry_limit_label')).pack(side='left', padx=(10, 2))
+    app.auto_switch_retries_var = tk.IntVar(value=app.config.get("ui_settings", {}).get("auto_switch_retry_limit", 10))
+    ttk.Spinbox(auto_switch_frame, from_=1, to=50, textvariable=app.auto_switch_retries_var, width=5).pack(side='left')
+
 
     output_cfg = app.config.get('output_settings', DEFAULT_CONFIG['output_settings'])
     output_frame = ttk.Labelframe(scrollable_frame, text=app._t('output_settings_label'))

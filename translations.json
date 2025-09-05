@@ -291,7 +291,10 @@
         "speechify_rate_label": "Швидкість:",
         "report_timing_label": "Режим звіту:",
         "report_timing_per_task": "Після всього завдання",
-        "report_timing_per_language": "Після кожної мови"
+        "report_timing_per_language": "Після кожної мови",
+        "auto_switch_service_label": "Авто-перемикання сервісу при помилці",
+        "retry_limit_label": "Спроб до перемикання:",
+        "regenerate_alt_button": "Спробувати іншим сервісом"
     },
     "en": {
         "api_tab_label": "API",
@@ -583,6 +586,9 @@
         "speechify_rate_label": "Rate:",
         "report_timing_label": "Report Mode:",
         "report_timing_per_task": "After the entire task",
-        "report_timing_per_language": "After each language"
+        "report_timing_per_language": "After each language",
+        "auto_switch_service_label": "Auto-switch service on failure",
+        "retry_limit_label": "Retries before switch:",
+        "regenerate_alt_button": "Try with another service"
     }
 }
