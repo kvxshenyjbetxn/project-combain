@@ -46,6 +46,30 @@ def create_log_tab(notebook, app):
     switch_service_button_log.pack(side='left', padx=5)
     app.switch_service_buttons.append(switch_service_button_log)
 
+    # --- Нова кнопка регенерації іншим сервісом ---
+    regenerate_alt_button_log = ttk.Button(
+        log_buttons_frame,
+        text=app._t('regenerate_alt_button'),
+        command=app._on_regenerate_alt_click,
+        bootstyle="success",
+        state="disabled"
+    )
+    regenerate_alt_button_log.pack(side='left', padx=5)
+    app.regenerate_alt_buttons.append(regenerate_alt_button_log)
+
+    # --- Новий вибір API ---
+    ttk.Label(log_buttons_frame, text=f"{app._t('image_api_label')}:").pack(side='left', padx=(10, 2))
+    image_api_combo_log = ttk.Combobox(
+        log_buttons_frame, 
+        textvariable=app.active_image_api_var, 
+        values=["pollinations", "recraft"], 
+        state="readonly",
+        width=12
+    )
+    image_api_combo_log.pack(side='left', padx=5)
+    image_api_combo_log.bind("<<ComboboxSelected>>", app._on_image_api_select)
+    app.image_api_selectors.append(image_api_combo_log)
+
     parallel_container_frame = ttk.Labelframe(app.log_frame, text=app._t('parallel_log_label'))
     parallel_container_frame.pack(fill='both', expand=True, padx=5, pady=(2, 5))
 

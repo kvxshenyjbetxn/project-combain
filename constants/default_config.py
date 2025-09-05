@@ -24,7 +24,6 @@ DEFAULT_CONFIG = {
         "width": 1920,
         "height": 1080,
         "timeout": 6,
-        "retries": 5,
         "remove_logo": True
     },
     "recraft": {
@@ -141,6 +140,8 @@ DEFAULT_CONFIG = {
             "time": 150,
             "status": 100
         },
-        "image_control_enabled": False
+        "image_control_enabled": False,
+        "auto_switch_service_on_fail": False,
+        "auto_switch_retry_limit": 10
     }
 }

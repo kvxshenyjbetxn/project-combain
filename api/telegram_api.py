@@ -114,10 +114,12 @@ class TelegramAPI:
             logger.error(f"Telegram -> Помилка мережі при отриманні оновлень: {e}")
             return None
 
-    def answer_callback_query(self, callback_query_id):
+    def answer_callback_query(self, callback_query_id, text=None):
         """Відповідає на натискання кнопки, щоб прибрати годинник."""
         url = f"{self.base_url}/answerCallbackQuery"
         payload = {'callback_query_id': callback_query_id}
+        if text:
+            payload['text'] = text
         try:
             requests.post(url, json=payload, timeout=5)
         except requests.exceptions.RequestException as e:
