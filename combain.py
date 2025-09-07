@@ -2126,7 +2126,7 @@ class TranslationApp:
         self.config["pollinations"]["width"] = self.poll_width_var.get()
         self.config["pollinations"]["height"] = self.poll_height_var.get()
         self.config["pollinations"]["timeout"] = self.poll_timeout_var.get()
-        self.config['ui_settings']['image_generation_api'] = self.image_api_var.get()
+        self.config['ui_settings']['image_generation_api'] = self.active_image_api_var.get()
         self.config["pollinations"]["remove_logo"] = self.poll_remove_logo_var.get()
         if 'recraft' not in self.config: self.config['recraft'] = {}
         self.config['recraft']['api_key'] = self.recraft_api_key_var.get()
@@ -2193,7 +2193,7 @@ class TranslationApp:
             if template_name not in self.config["rewrite_prompt_templates"]:
                  self.config["rewrite_prompt_templates"][template_name] = {}
         if 'ui_settings' not in self.config: self.config['ui_settings'] = {}
-        self.config['ui_settings']['image_generation_api'] = self.image_api_var.get()
+        self.config['ui_settings']['image_generation_api'] = self.active_image_api_var.get()
         
         selected_display_name = self.theme_var.get()
         self.config['ui_settings']['theme'] = self.theme_map_to_internal.get(selected_display_name, "darkly")
