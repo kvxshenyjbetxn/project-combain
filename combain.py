@@ -340,6 +340,7 @@ class TranslationApp:
 
         self.task_queue = []
         self.is_processing_queue = False
+        self.is_shutting_down = False
         self.dynamic_scrollbars = []
 
         self.rewrite_task_queue = []
@@ -483,12 +484,10 @@ class TranslationApp:
                 self.root.after(0, lambda b=button: b.config(state="disabled"))
 
     def on_closing(self):
-        self.shutdown_event.set() # Сигнал всім потокам про зупинку
+        # 1. Вмикаємо "режим тиші"
+        self.is_shutting_down = True
+        self.shutdown_event.set() 
         logger.info("Завершення роботи програми та збереження налаштувань інтерфейсу...")
-
-        # Очищуємо логи в Firebase перед виходом
-        if hasattr(self, 'firebase_api') and self.firebase_api.is_initialized:
-            self.firebase_api.clear_logs()
 
         if "ui_settings" not in self.config:
             self.config["ui_settings"] = {}
@@ -524,6 +523,11 @@ class TranslationApp:
                         logger.debug(f"Видалено: {file_path}")
         except Exception as e:
             logger.error(f"Помилка при очищенні папки 'preview': {e}")
+
+        # 2. Очищуємо логи в Firebase в самому кінці
+        if hasattr(self, 'firebase_api') and self.firebase_api.is_initialized:
+            self.firebase_api.clear_logs()
+            time.sleep(1) # Невелика затримка, щоб запит напевно пішов
 
         logger.info("Програму закрито.")
         self.root.destroy()

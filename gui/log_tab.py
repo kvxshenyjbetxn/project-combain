@@ -126,8 +126,8 @@ def create_log_tab(notebook, app):
         def handle_main_log(self, record):
             msg = self.format(record)
 
-            # Відправляємо лог у Firebase, якщо API ініціалізовано
-            if hasattr(self.app, 'firebase_api') and self.app.firebase_api.is_initialized:
+            # Відправляємо лог у Firebase, ТІЛЬКИ ЯКЩО програма не в процесі закриття
+            if hasattr(self.app, 'firebase_api') and self.app.firebase_api.is_initialized and not self.app.is_shutting_down:
                 self.app.firebase_api.send_log_in_thread(msg)
 
             def append_text():
