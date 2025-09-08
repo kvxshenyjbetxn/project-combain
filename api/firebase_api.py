@@ -7,6 +7,7 @@ import os
 import datetime
 import threading
 import mimetypes
+import time
 
 logger = logging.getLogger("TranslationApp")
 
@@ -90,18 +91,34 @@ class FirebaseAPI:
             logger.error(f"Firebase -> Помилка завантаження зображення '{local_path}': {e}", exc_info=True)
             return None
 
-    def add_image_to_db(self, image_id, image_url, task_name, lang_code):
+    def add_image_to_db(self, image_id, image_url, task_name, lang_code, prompt):
         if not self.is_initialized: return
         try:
             self.images_ref.child(image_id).set({
                 'id': image_id, 
                 'url': image_url,
                 'taskName': task_name,
-                'langCode': lang_code
+                'langCode': lang_code,
+                'prompt': prompt,
+                'timestamp': int(time.time() * 1000) # Час у мілісекундах для сортування
             })
             logger.info(f"Firebase -> Додано посилання на зображення в базу даних: {image_id}")
         except Exception as e:
             logger.error(f"Firebase -> Помилка додавання зображення в базу даних: {e}")
+            
+    def update_image_in_db(self, image_id, image_url):
+        if not self.is_initialized: return
+        try:
+            # Створюємо унікальний "кеш-бастер" на основі часу
+            cache_buster = f"?v={int(time.time() * 1000)}"
+            update_data = {
+                'url': image_url + cache_buster, # Додаємо його до URL
+                'timestamp': int(time.time() * 1000) # Оновлюємо час для сортування
+            }
+            self.images_ref.child(image_id).update(update_data)
+            logger.info(f"Firebase -> Оновлено посилання на зображення в базі даних: {image_id}")
+        except Exception as e:
+            logger.error(f"Firebase -> Помилка оновлення зображення в базі даних: {e}")
             
     def clear_images(self):
         """Видаляє всі зображення з Storage та Realtime Database."""
@@ -157,7 +174,7 @@ class FirebaseAPI:
         except Exception as e:
             logger.error(f"Firebase -> Помилка очищення команд: {e}")
 
-    def upload_and_add_image_in_thread(self, local_path, task_key, image_index, task_name):
+    def upload_and_add_image_in_thread(self, local_path, task_key, image_index, task_name, prompt):
         if not self.is_initialized: return
         
         def worker():
@@ -167,7 +184,7 @@ class FirebaseAPI:
             
             image_url = self.upload_image_and_get_url(local_path, remote_path)
             if image_url:
-                self.add_image_to_db(image_id, image_url, task_name, lang_code)
+                self.add_image_to_db(image_id, image_url, task_name, lang_code, prompt)
         
         thread = threading.Thread(target=worker, daemon=True)
         thread.start()

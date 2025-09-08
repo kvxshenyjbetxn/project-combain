@@ -21,6 +21,7 @@ import shutil
 import numpy as np
 import queue
 import math
+from queue import Queue
 
 # --- Нові імпорти для галереї ---
 from PIL import Image, ImageTk
@@ -391,6 +392,7 @@ class TranslationApp:
         self.command_listener_thread = None
         self.stop_command_listener = threading.Event()
         self.image_id_to_path_map = {}
+        self.command_queue = Queue()
         
         # Словники для відповідності тем
         self.theme_map_to_display = {
@@ -493,23 +495,41 @@ class TranslationApp:
         if self.is_shutting_down or event.path == "/" and event.data is None:
             return
 
-        # Обробляємо тільки нові команди (подія 'put')
         if event.event_type == 'put' and event.path != '/':
             command_id = event.path.strip('/')
             command_data = event.data
-            logger.info(f"Firebase -> Отримано команду: {command_id} з даними: {command_data}")
+            
+            # Кладемо команду в чергу
+            self.command_queue.put((command_id, command_data))
 
-            # Видаляємо команду після обробки
-            self.firebase_api.commands_ref.child(command_id).delete()
+    def _process_command_queue(self):
+        """Обробити команди з черги в основному потоці GUI."""
+        try:
+            while not self.command_queue.empty():
+                command_id, command_data = self.command_queue.get_nowait()
+                
+                # ВИПРАВЛЕННЯ: Ігноруємо порожні дані, які приходять після видалення команди
+                if command_data is None:
+                    continue
 
-            command = command_data.get("command")
-            image_id = command_data.get("imageId")
+                logger.info(f"Firebase -> Обробка команди з черги: {command_id} з даними: {command_data}")
 
-            if command == "delete":
-                self.root.after(0, self._delete_image_by_id, image_id)
-            elif command == "regenerate":
-                new_prompt = command_data.get("newPrompt") # Може бути None
-                self.root.after(0, self._regenerate_image_by_id, image_id, new_prompt)
+                # Видаляємо команду одразу, щоб уникнути повторної обробки
+                self.firebase_api.commands_ref.child(command_id).delete()
+
+                command = command_data.get("command")
+                image_id = command_data.get("imageId")
+
+                if command == "delete":
+                    self._delete_image_by_id(image_id)
+                elif command == "regenerate":
+                    new_prompt = command_data.get("newPrompt")
+                    self._regenerate_image_by_id(image_id, new_prompt)
+        
+        finally:
+            # Перезапускаємо таймер для наступної перевірки
+            if not self.stop_command_listener.is_set():
+                self.root.after(200, self._process_command_queue)
 
     def _delete_image_by_id(self, image_id):
         if image_id in self.image_id_to_path_map:
@@ -523,6 +543,12 @@ class TranslationApp:
         if image_id in self.image_id_to_path_map:
             path = self.image_id_to_path_map[image_id]
             logger.info(f"Виконання команди 'regenerate' для {image_id} (шлях: {path})")
+            
+            # Якщо прийшов новий промпт, оновлюємо його в мапі
+            if new_prompt:
+                self.image_prompts_map[path] = new_prompt
+                logger.info(f"Оновлено промпт для {os.path.basename(path)}: {new_prompt}")
+
             self._regenerate_image(path, new_prompt=new_prompt, use_random_seed=not new_prompt)
         else:
             logger.warning(f"Не вдалося знайти локальний шлях для регенерації зображення ID {image_id}")
@@ -917,7 +943,7 @@ class TranslationApp:
                     task_index, lang_code = task_key
                     image_id = f"task{task_index}_{lang_code}_img{i}"
                     self.image_id_to_path_map[image_id] = image_path # Зберігаємо шлях
-                    self.firebase_api.upload_and_add_image_in_thread(image_path, task_key, i, task_name)
+                    self.firebase_api.upload_and_add_image_in_thread(image_path, task_key, i, task_name, prompt)
 
                 status_key = f"{task_key[0]}_{task_key[1]}"
                 if status_key in self.task_completion_status:
@@ -1153,8 +1179,12 @@ class TranslationApp:
         # Запускаємо прослуховування команд з Firebase
         if self.firebase_api.is_initialized:
             self.stop_command_listener.clear()
+            # Очищуємо попередні команди перед стартом
+            self.firebase_api.clear_commands()
             self.command_listener_thread = threading.Thread(target=self._command_listener_worker, daemon=True)
             self.command_listener_thread.start()
+            # Запускаємо обробник черги
+            self.root.after(100, self._process_command_queue)
 
         self._update_button_states(is_processing=True, is_image_stuck=False)
 
@@ -2500,13 +2530,11 @@ class TranslationApp:
             api_params = {}
             active_api_name = service_override if service_override else self.active_image_api
             
-            # --- КЛЮЧОВА ЗМІНА ---
-            # Якщо сервіс - Pollinations, ЗАВЖДИ додаємо випадковий seed для уникнення кешування
             if active_api_name == "pollinations":
                 random_seed = random.randint(0, 2**32 - 1)
                 api_params['seed'] = random_seed
                 logger.info(f"Regenerating image {os.path.basename(image_path)} with new seed: {random_seed}")
-            elif use_random_seed: # Для інших сервісів (якщо знадобиться) seed додається лише по кнопці "🔄"
+            elif use_random_seed:
                 random_seed = random.randint(0, 2**32 - 1)
                 api_params['seed'] = random_seed
                 logger.info(f"Regenerating image {os.path.basename(image_path)} with new seed: {random_seed}")
@@ -2516,7 +2544,6 @@ class TranslationApp:
             success = False
             
             if active_api_name == "pollinations":
-                # Перевіряємо, чи передали нову модель з діалогового вікна
                 if 'model_override' in kwargs:
                     api_params['model'] = kwargs['model_override']
                 success = self.poll_api.generate_image(prompt_to_use, image_path, **api_params)
@@ -2536,6 +2563,18 @@ class TranslationApp:
             if success:
                 logger.info(f"Image regenerated successfully: {image_path}")
                 self.root.after(0, lambda: self._update_gallery_image(image_path, is_loading=False, is_error=False))
+
+                # --- ОНОВЛЕННЯ ЗОБРАЖЕННЯ В FIREBASE ---
+                image_id_to_update = next((id for id, path in self.image_id_to_path_map.items() if path == image_path), None)
+                if image_id_to_update and self.firebase_api.is_initialized:
+                    remote_path = f"gallery_images/{image_id_to_update}.jpg"
+                    # Завантажуємо оновлений файл на те ж місце в Storage
+                    new_url = self.firebase_api.upload_image_and_get_url(image_path, remote_path)
+                    if new_url:
+                        # Оновлюємо посилання та timestamp в базі даних
+                        self.firebase_api.update_image_in_db(image_id_to_update, new_url)
+                # --- КІНЕЦЬ ОНОВЛЕННЯ ---
+
             else:
                 logger.error(f"Failed to regenerate image: {image_path}")
                 self.root.after(0, lambda: self._update_gallery_image(image_path, is_loading=False, is_error=True))
