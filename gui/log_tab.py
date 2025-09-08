@@ -126,16 +126,9 @@ def create_log_tab(notebook, app):
         def handle_main_log(self, record):
             msg = self.format(record)
 
-            # Відправляємо лог у мобільний додаток, якщо ввімкнено
-            if hasattr(self.app, 'mobile_tg_api') and self.app.mobile_tg_api.enabled:
-                mobile_log_message = f"LOG::{msg}"
-                # Обрізаємо, якщо повідомлення занадто довге
-                if len(mobile_log_message) > 4096:
-                    mobile_log_message = mobile_log_message[:4093] + "..."
-                
-                # Використовуємо новий метод, який не використовує Markdown
-                if hasattr(self.app.mobile_tg_api, 'send_plain_text_in_thread'):
-                     self.app.mobile_tg_api.send_plain_text_in_thread(mobile_log_message)
+            # Відправляємо лог у Firebase, якщо API ініціалізовано
+            if hasattr(self.app, 'firebase_api') and self.app.firebase_api.is_initialized:
+                self.app.firebase_api.send_log_in_thread(msg)
 
             def append_text():
                 self.main_text_widget.configure(state='normal')

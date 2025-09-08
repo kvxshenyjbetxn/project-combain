@@ -37,7 +37,8 @@ from api.pollinations_api import PollinationsAPI
 from api.recraft_api import RecraftAPI
 from api.telegram_api import TelegramAPI
 from api.voicemaker_api import VoiceMakerAPI
-from api.speechify_api import SpeechifyAPI # <-- НОВИЙ ІМПОРТ
+from api.speechify_api import SpeechifyAPI
+from api.firebase_api import FirebaseAPI
 
 # Імпорти GUI
 from gui.task_tab import create_task_tab
@@ -333,9 +334,7 @@ class TranslationApp:
         self.vm_api = VoiceMakerAPI(self.config)
         self.recraft_api = RecraftAPI(self.config)
         self.tg_api = TelegramAPI(self.config)
-        # Створюємо окремий екземпляр API для мобільного бота
-        mobile_bot_config = self.config.get("telegram", {}).get("mobile_bot", {})
-        self.mobile_tg_api = TelegramAPI({"telegram": mobile_bot_config})
+        self.firebase_api = FirebaseAPI(self.config) # <-- НОВА ІНІЦІАЛІЗАЦІЯ
         self.speechify_api = SpeechifyAPI(self.config)
         self.montage_api = MontageAPI(self.config, self, self.update_progress_for_montage)
 
@@ -753,7 +752,6 @@ class TranslationApp:
         
         self.is_processing_queue = True
         self.pause_resume_button.config(state="normal")
-        self._start_telegram_polling()
         
         thread = threading.Thread(target=self._process_hybrid_queue, args=(self.task_queue, 'main'))
         thread.daemon = True
@@ -768,7 +766,6 @@ class TranslationApp:
             return
         
         self.is_processing_rewrite_queue = True
-        self._start_telegram_polling()
         
         thread = threading.Thread(target=self._process_hybrid_queue, args=(self.rewrite_task_queue, 'rewrite'))
         thread.daemon = True
@@ -902,48 +899,6 @@ class TranslationApp:
                 i += 1
 
         return all_successful
-
-    def _start_telegram_polling(self):
-        """Запускає потік для опитування оновлень Telegram, якщо він ще не запущений."""
-        if not self.tg_api.enabled:
-            return
-        if self.telegram_polling_thread and self.telegram_polling_thread.is_alive():
-            logger.info("Telegram polling thread is already running.")
-            return
-
-        self.stop_telegram_polling.clear()
-        self.telegram_polling_thread = threading.Thread(target=self._poll_telegram_updates, daemon=True)
-        self.telegram_polling_thread.start()
-        logger.info("Started Telegram polling thread.")
-
-    def _poll_telegram_updates(self):
-        """Цикл, що опитує Telegram на наявність натискань кнопок."""
-        while not self.stop_telegram_polling.is_set():
-            updates = self.tg_api.get_updates(offset=self.last_telegram_update_id + 1)
-            if updates and updates.get("ok"):
-                for update in updates.get("result", []):
-                    self.last_telegram_update_id = update["update_id"]
-                    
-                    if "callback_query" in update:
-                        callback_data = update["callback_query"]["data"]
-                        query_id = update["callback_query"]["id"]
-                        logger.info(f"Received Telegram callback: {callback_data}")
-                        
-                        if callback_data == "skip_image_action":
-                            self.root.after(0, self._on_skip_image_click)
-                            self.tg_api.answer_callback_query(query_id, "Пропускаю зображення...")
-                        elif callback_data == "switch_service_action":
-                            self.root.after(0, self._on_switch_service_click)
-                            self.tg_api.answer_callback_query(query_id, "Перемикаю сервіс...")
-                        elif callback_data == "regenerate_alt_action":
-                            self.root.after(0, self._on_regenerate_alt_click)
-                            self.tg_api.answer_callback_query(query_id, "Пробую іншим сервісом...")
-                        elif callback_data == "continue_montage_action":
-                            self.root.after(0, self.continue_processing_after_image_control)
-                            self.tg_api.answer_callback_query(query_id)
-            
-            time.sleep(2) # Затримка між запитами
-        logger.info("Stopped Telegram polling thread.")
 
     def setup_empty_gallery(self, queue_type, tasks_to_display):
         if queue_type == 'main': 
@@ -2079,16 +2034,6 @@ class TranslationApp:
         else:
             messagebox.showerror(self._t('test_connection_title_tg'), message)
 
-    def test_mobile_telegram_connection(self):
-        api_key = self.tg_mobile_api_key_var.get()
-        temp_config = {"telegram": {"api_key": api_key}}
-        temp_api = TelegramAPI(temp_config)
-        success, message = temp_api.test_connection()
-        if success:
-            messagebox.showinfo(self._t('test_connection_title_tg'), f"Mobile Bot: {message}")
-        else:
-            messagebox.showerror(self._t('test_connection_title_tg'), f"Mobile Bot: {message}")
-
     def test_speechify_connection(self):
         api_key = self.speechify_api_key_var.get()
         temp_config = {"speechify": {"api_key": api_key}}
@@ -2167,11 +2112,9 @@ class TranslationApp:
         self.config['telegram']['enabled'] = self.tg_enabled_var.get()
         self.config['telegram']['api_key'] = self.tg_api_key_var.get()
         self.config['telegram']['chat_id'] = self.tg_chat_id_var.get()
-        
-        if 'mobile_bot' not in self.config['telegram']: self.config['telegram']['mobile_bot'] = {}
-        self.config['telegram']['mobile_bot']['enabled'] = self.tg_mobile_enabled_var.get()
-        self.config['telegram']['mobile_bot']['api_key'] = self.tg_mobile_api_key_var.get()
-        self.config['telegram']['mobile_bot']['chat_id'] = self.tg_mobile_chat_id_var.get()
+
+        if 'firebase' not in self.config: self.config['firebase'] = {}
+        self.config['firebase']['database_url'] = self.firebase_db_url_var.get()
 
         # Зберігаємо нове налаштування режиму звіту
         display_value = self.tg_report_timing_var.get()
@@ -2228,8 +2171,7 @@ class TranslationApp:
         self.el_api = ElevenLabsAPI(self.config)
         self.vm_api = VoiceMakerAPI(self.config)
         self.tg_api = TelegramAPI(self.config)
-        mobile_bot_config = self.config.get("telegram", {}).get("mobile_bot", {})
-        self.mobile_tg_api = TelegramAPI({"telegram": mobile_bot_config})
+        self.firebase_api = FirebaseAPI(self.config)
         self.speechify_api = SpeechifyAPI(self.config)
         self.montage_api = MontageAPI(self.config, self, self.update_progress_for_montage)
         setup_ffmpeg_path(self.config)

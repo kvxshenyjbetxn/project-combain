@@ -68,6 +68,9 @@ DEFAULT_CONFIG = {
             "chat_id": ""
         }
     },
+    "firebase": {
+        "database_url": ""
+    },
     "parallel_processing": {
         "enabled": True,
         "num_chunks": 3,
