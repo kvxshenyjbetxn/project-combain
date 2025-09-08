@@ -48,7 +48,7 @@ class TelegramAPI:
                 response = requests.post(url, json=payload, timeout=10)
                 
                 if response.status_code == 200:
-                    logger.info(f"Telegram -> Сповіщення успішно надіслано в чат ID {self.chat_id}.")
+                    logger.debug(f"Telegram -> Сповіщення успішно надіслано в чат ID {self.chat_id}.")
                     return
                 
                 elif 400 <= response.status_code < 500:
@@ -80,7 +80,7 @@ class TelegramAPI:
         try:
             response = requests.post(url, json=payload, timeout=10)
             if response.status_code == 200:
-                logger.info(f"Telegram -> Просте текстове сповіщення успішно надіслано в чат ID {self.chat_id}.")
+                logger.debug(f"Telegram -> Просте текстове сповіщення успішно надіслано в чат ID {self.chat_id}.")
             else:
                 logger.error(f"Telegram -> Помилка надсилання простого тексту ({response.status_code}): {response.text}")
         except requests.exceptions.RequestException as e:
@@ -110,7 +110,7 @@ class TelegramAPI:
         try:
             response = requests.post(url, json=payload, timeout=15)
             if response.status_code == 200:
-                logger.info("Telegram -> Повідомлення з кнопками успішно надіслано.")
+                logger.debug("Telegram -> Повідомлення з кнопками успішно надіслано.")
             else:
                 logger.error(f"Telegram -> Помилка надсилання повідомлення з кнопками ({response.status_code}): {response.text}")
         except requests.exceptions.RequestException as e:
