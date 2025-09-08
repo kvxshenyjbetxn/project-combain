@@ -700,8 +700,34 @@ def create_other_settings_tab(parent_tab, app):
     add_text_widget_bindings(app, tg_chat_id_entry)
     
     ttk.Button(tg_frame, text=app._t('test_telegram_button'), command=app.test_telegram_connection, bootstyle="secondary-outline").grid(row=1, column=2, rowspan=2, padx=5, pady=2, sticky='ns')
+
+    # --- Розділювач та налаштування для мобільного бота ---
+    ttk.Separator(tg_frame, orient='horizontal').grid(row=3, column=0, columnspan=3, sticky='ew', padx=5, pady=10)
+
+    mobile_bot_frame = ttk.Frame(tg_frame)
+    mobile_bot_frame.grid(row=4, column=0, columnspan=3, sticky='ew')
+    mobile_bot_frame.grid_columnconfigure(1, weight=1)
+
+    app.tg_mobile_enabled_var = tk.BooleanVar(value=tg_cfg.get('mobile_bot', {}).get('enabled', False))
+    ttk.Checkbutton(mobile_bot_frame, variable=app.tg_mobile_enabled_var, text=app._t('enable_mobile_bot_label'), bootstyle="light-round-toggle").grid(row=0, column=0, columnspan=3, sticky='w', padx=5, pady=5)
+
+    ttk.Label(mobile_bot_frame, text=app._t('api_key_label')).grid(row=1, column=0, sticky='w', padx=5, pady=2)
+    app.tg_mobile_api_key_var = tk.StringVar(value=tg_cfg.get('mobile_bot', {}).get('api_key', ''))
+    tg_mobile_api_key_entry = ttk.Entry(mobile_bot_frame, textvariable=app.tg_mobile_api_key_var, show="*")
+    tg_mobile_api_key_entry.grid(row=1, column=1, sticky='ew', padx=5, pady=2)
+    add_text_widget_bindings(app, tg_mobile_api_key_entry)
+
+    ttk.Label(mobile_bot_frame, text=app._t('chat_id_label')).grid(row=2, column=0, sticky='w', padx=5, pady=2)
+    app.tg_mobile_chat_id_var = tk.StringVar(value=tg_cfg.get('mobile_bot', {}).get('chat_id', ''))
+    tg_mobile_chat_id_entry = ttk.Entry(mobile_bot_frame, textvariable=app.tg_mobile_chat_id_var)
+    tg_mobile_chat_id_entry.grid(row=2, column=1, sticky='ew', padx=5, pady=2)
+    add_text_widget_bindings(app, tg_mobile_chat_id_entry)
+
+    ttk.Button(mobile_bot_frame, text=app._t('test_telegram_button'), command=app.test_mobile_telegram_connection, bootstyle="secondary-outline").grid(row=1, column=2, rowspan=2, padx=5, pady=2, sticky='ns')
+
+
     # Новий віджет для вибору режиму звіту
-    ttk.Label(tg_frame, text=app._t('report_timing_label')).grid(row=3, column=0, sticky='w', padx=5, pady=5)
+    ttk.Label(tg_frame, text=app._t('report_timing_label')).grid(row=5, column=0, sticky='w', padx=5, pady=5) # Змінено row з 3 на 5
     app.tg_report_timing_var = tk.StringVar(value=tg_cfg.get('report_timing', 'per_task'))
     report_timing_combo = ttk.Combobox(tg_frame, textvariable=app.tg_report_timing_var, 
                                        values=['per_task', 'per_language'], 

@@ -99,10 +99,11 @@ def create_log_tab(notebook, app):
             return True
 
     class MasterLogHandler(logging.Handler):
-        def __init__(self, main_text_widget, parallel_widgets):
+        def __init__(self, main_text_widget, parallel_widgets, app_instance):
             super().__init__()
             self.main_text_widget = main_text_widget
             self.parallel_widgets = parallel_widgets
+            self.app = app_instance
             self.worker_id_re = re.compile(r'Chunk (\d+)')
 
         def emit(self, record):
@@ -124,6 +125,18 @@ def create_log_tab(notebook, app):
 
         def handle_main_log(self, record):
             msg = self.format(record)
+
+            # Відправляємо лог у мобільний додаток, якщо ввімкнено
+            if hasattr(self.app, 'mobile_tg_api') and self.app.mobile_tg_api.enabled:
+                mobile_log_message = f"LOG::{msg}"
+                # Обрізаємо, якщо повідомлення занадто довге
+                if len(mobile_log_message) > 4096:
+                    mobile_log_message = mobile_log_message[:4093] + "..."
+                
+                # Використовуємо новий метод, який не використовує Markdown
+                if hasattr(self.app.mobile_tg_api, 'send_plain_text_in_thread'):
+                     self.app.mobile_tg_api.send_plain_text_in_thread(mobile_log_message)
+
             def append_text():
                 self.main_text_widget.configure(state='normal')
                 self.main_text_widget.insert(tk.END, msg + '\n')
@@ -157,7 +170,7 @@ def create_log_tab(notebook, app):
             target_widget.after(0, update_widget)
 
     if not app.gui_log_handler:
-        app.gui_log_handler = MasterLogHandler(app.log_text, app.parallel_log_widgets)
+        app.gui_log_handler = MasterLogHandler(app.log_text, app.parallel_log_widgets, app)
         app.gui_log_handler.setLevel(logging.INFO)
         app.gui_log_handler.addFilter(ContextFilter())
         formatter = logging.Formatter('%(message)s')

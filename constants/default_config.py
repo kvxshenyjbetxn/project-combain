@@ -61,6 +61,11 @@ DEFAULT_CONFIG = {
             "download": True,
             "transcribe": True,
             "rewrite": True
+        },
+        "mobile_bot": {
+            "enabled": False,
+            "api_key": "",
+            "chat_id": ""
         }
     },
     "parallel_processing": {

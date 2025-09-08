@@ -333,7 +333,10 @@ class TranslationApp:
         self.vm_api = VoiceMakerAPI(self.config)
         self.recraft_api = RecraftAPI(self.config)
         self.tg_api = TelegramAPI(self.config)
-        self.speechify_api = SpeechifyAPI(self.config) # <-- НОВИЙ СЕРВІС
+        # Створюємо окремий екземпляр API для мобільного бота
+        mobile_bot_config = self.config.get("telegram", {}).get("mobile_bot", {})
+        self.mobile_tg_api = TelegramAPI({"telegram": mobile_bot_config})
+        self.speechify_api = SpeechifyAPI(self.config)
         self.montage_api = MontageAPI(self.config, self, self.update_progress_for_montage)
 
         self.task_queue = []
@@ -2076,6 +2079,16 @@ class TranslationApp:
         else:
             messagebox.showerror(self._t('test_connection_title_tg'), message)
 
+    def test_mobile_telegram_connection(self):
+        api_key = self.tg_mobile_api_key_var.get()
+        temp_config = {"telegram": {"api_key": api_key}}
+        temp_api = TelegramAPI(temp_config)
+        success, message = temp_api.test_connection()
+        if success:
+            messagebox.showinfo(self._t('test_connection_title_tg'), f"Mobile Bot: {message}")
+        else:
+            messagebox.showerror(self._t('test_connection_title_tg'), f"Mobile Bot: {message}")
+
     def test_speechify_connection(self):
         api_key = self.speechify_api_key_var.get()
         temp_config = {"speechify": {"api_key": api_key}}
@@ -2154,6 +2167,12 @@ class TranslationApp:
         self.config['telegram']['enabled'] = self.tg_enabled_var.get()
         self.config['telegram']['api_key'] = self.tg_api_key_var.get()
         self.config['telegram']['chat_id'] = self.tg_chat_id_var.get()
+        
+        if 'mobile_bot' not in self.config['telegram']: self.config['telegram']['mobile_bot'] = {}
+        self.config['telegram']['mobile_bot']['enabled'] = self.tg_mobile_enabled_var.get()
+        self.config['telegram']['mobile_bot']['api_key'] = self.tg_mobile_api_key_var.get()
+        self.config['telegram']['mobile_bot']['chat_id'] = self.tg_mobile_chat_id_var.get()
+
         # Зберігаємо нове налаштування режиму звіту
         display_value = self.tg_report_timing_var.get()
         # Знаходимо ключ ('per_task' або 'per_language') за відображуваним значенням
@@ -2209,6 +2228,8 @@ class TranslationApp:
         self.el_api = ElevenLabsAPI(self.config)
         self.vm_api = VoiceMakerAPI(self.config)
         self.tg_api = TelegramAPI(self.config)
+        mobile_bot_config = self.config.get("telegram", {}).get("mobile_bot", {})
+        self.mobile_tg_api = TelegramAPI({"telegram": mobile_bot_config})
         self.speechify_api = SpeechifyAPI(self.config)
         self.montage_api = MontageAPI(self.config, self, self.update_progress_for_montage)
         setup_ffmpeg_path(self.config)
