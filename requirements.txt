@@ -6,3 +6,4 @@ ffmpeg-python
 numpy
 yt-dlp
 firebase-admin
+google-cloud-storage

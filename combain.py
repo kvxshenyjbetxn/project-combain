@@ -524,10 +524,11 @@ class TranslationApp:
         except Exception as e:
             logger.error(f"Помилка при очищенні папки 'preview': {e}")
 
-        # 2. Очищуємо логи в Firebase в самому кінці
+        # 2. Очищуємо логи та зображення в Firebase в самому кінці
         if hasattr(self, 'firebase_api') and self.firebase_api.is_initialized:
             self.firebase_api.clear_logs()
-            time.sleep(1) # Невелика затримка, щоб запит напевно пішов
+            self.firebase_api.clear_images()
+            time.sleep(1) # Невелика затримка, щоб запити напевно пішли
 
         logger.info("Програму закрито.")
         self.root.destroy()
@@ -859,7 +860,12 @@ class TranslationApp:
                 consecutive_failures = 0 
                 logger.info(f"[{current_api_for_generation.capitalize()}] Successfully generated image {i+1}/{len(prompts)}.")
                 self.image_prompts_map[image_path] = prompt
+                
+                # Додаємо зображення в локальну галерею та в Firebase
                 self.root.after(0, self._add_image_to_gallery, image_path, task_key)
+                if self.firebase_api.is_initialized:
+                    self.firebase_api.upload_and_add_image_in_thread(image_path, task_key, i)
+
                 status_key = f"{task_key[0]}_{task_key[1]}"
                 if status_key in self.task_completion_status:
                     self.task_completion_status[status_key]["images_generated"] += 1

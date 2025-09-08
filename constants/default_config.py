@@ -69,7 +69,8 @@ DEFAULT_CONFIG = {
         }
     },
     "firebase": {
-        "database_url": ""
+        "database_url": "",
+        "storage_bucket": "gs://projectcombain.firebasestorage.app"
     },
     "parallel_processing": {
         "enabled": True,
