@@ -63,3 +63,15 @@ class FirebaseAPI:
             return
         thread = threading.Thread(target=self.send_log, args=(message,), daemon=True)
         thread.start()
+
+    def clear_logs(self):
+        """Видаляє всі записи з вузла /logs у базі даних."""
+        if not self.is_initialized:
+            logger.warning("Firebase -> Неможливо очистити логи, API не ініціалізовано.")
+            return
+        try:
+            logger.info("Firebase -> Очищення логів з бази даних...")
+            self.db_ref.delete()
+            logger.info("Firebase -> Логи успішно очищено.")
+        except Exception as e:
+            logger.error(f"Firebase -> Не вдалося очистити логи: {e}")

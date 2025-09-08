@@ -485,6 +485,11 @@ class TranslationApp:
     def on_closing(self):
         self.shutdown_event.set() # Сигнал всім потокам про зупинку
         logger.info("Завершення роботи програми та збереження налаштувань інтерфейсу...")
+
+        # Очищуємо логи в Firebase перед виходом
+        if hasattr(self, 'firebase_api') and self.firebase_api.is_initialized:
+            self.firebase_api.clear_logs()
+
         if "ui_settings" not in self.config:
             self.config["ui_settings"] = {}
         
