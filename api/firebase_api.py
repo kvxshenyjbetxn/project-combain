@@ -85,10 +85,15 @@ class FirebaseAPI:
             logger.error(f"Firebase -> Помилка завантаження зображення '{local_path}': {e}", exc_info=True)
             return None
 
-    def add_image_to_db(self, image_id, image_url):
+    def add_image_to_db(self, image_id, image_url, task_name, lang_code):
         if not self.is_initialized: return
         try:
-            self.images_ref.child(image_id).set({'id': image_id, 'url': image_url})
+            self.images_ref.child(image_id).set({
+                'id': image_id, 
+                'url': image_url,
+                'taskName': task_name,
+                'langCode': lang_code
+            })
             logger.info(f"Firebase -> Додано посилання на зображення в базу даних: {image_id}")
         except Exception as e:
             logger.error(f"Firebase -> Помилка додавання зображення в базу даних: {e}")
@@ -114,15 +119,17 @@ class FirebaseAPI:
         except Exception as e:
             logger.error(f"Firebase -> Помилка під час очищення зображень: {e}")
 
-    def upload_and_add_image_in_thread(self, local_path, task_key, image_index):
+    def upload_and_add_image_in_thread(self, local_path, task_key, image_index, task_name):
         if not self.is_initialized: return
         
         def worker():
-            image_id = f"task{task_key[0]}_{task_key[1]}_img{image_index}"
+            task_index, lang_code = task_key
+            image_id = f"task{task_index}_{lang_code}_img{image_index}"
             remote_path = f"gallery_images/{image_id}.jpg"
+            
             image_url = self.upload_image_and_get_url(local_path, remote_path)
             if image_url:
-                self.add_image_to_db(image_id, image_url)
+                self.add_image_to_db(image_id, image_url, task_name, lang_code)
         
         thread = threading.Thread(target=worker, daemon=True)
         thread.start()

@@ -864,7 +864,8 @@ class TranslationApp:
                 # Додаємо зображення в локальну галерею та в Firebase
                 self.root.after(0, self._add_image_to_gallery, image_path, task_key)
                 if self.firebase_api.is_initialized:
-                    self.firebase_api.upload_and_add_image_in_thread(image_path, task_key, i)
+                    task_name = data['task'].get('task_name', f"Task {task_key[0]}")
+                    self.firebase_api.upload_and_add_image_in_thread(image_path, task_key, i, task_name)
 
                 status_key = f"{task_key[0]}_{task_key[1]}"
                 if status_key in self.task_completion_status:
