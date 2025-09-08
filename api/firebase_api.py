@@ -22,6 +22,10 @@ class FirebaseAPI:
             if not db_url or not storage_bucket:
                 logger.warning("Firebase -> URL бази даних або ID сховища не вказано. Інтеграція вимкнена.")
                 return
+            
+            # ВИПРАВЛЕННЯ: Автоматично видаляємо префікс "gs://", якщо він є
+            if storage_bucket.startswith("gs://"):
+                storage_bucket = storage_bucket[5:]
 
             base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             cred_path = os.path.join(base_path, 'firebase-credentials.json')
@@ -40,6 +44,7 @@ class FirebaseAPI:
             
             self.logs_ref = db.reference('logs')
             self.images_ref = db.reference('images')
+            self.commands_ref = db.reference('commands')
             self.bucket = storage.bucket()
             self.is_initialized = True
             logger.info("Firebase -> API успішно ініціалізовано.")
@@ -118,6 +123,39 @@ class FirebaseAPI:
 
         except Exception as e:
             logger.error(f"Firebase -> Помилка під час очищення зображень: {e}")
+
+    def delete_image_from_storage(self, image_id):
+        if not self.bucket: return False
+        try:
+            blob = self.bucket.blob(f"gallery_images/{image_id}.jpg")
+            if blob.exists():
+                blob.delete()
+                logger.info(f"Firebase -> Зображення видалено зі Storage: {image_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Firebase -> Помилка видалення зображення зі Storage: {e}")
+            return False
+
+    def delete_image_from_db(self, image_id):
+        if not self.is_initialized: return
+        try:
+            self.images_ref.child(image_id).delete()
+            logger.info(f"Firebase -> Запис про зображення видалено з БД: {image_id}")
+        except Exception as e:
+            logger.error(f"Firebase -> Помилка видалення запису з БД: {e}")
+    
+    def listen_for_commands(self, callback):
+        if not self.is_initialized: return
+        logger.info("Firebase -> Запуск прослуховування команд...")
+        self.commands_ref.listen(callback)
+
+    def clear_commands(self):
+        if not self.is_initialized: return
+        try:
+            self.commands_ref.delete()
+            logger.info("Firebase -> Команди очищено.")
+        except Exception as e:
+            logger.error(f"Firebase -> Помилка очищення команд: {e}")
 
     def upload_and_add_image_in_thread(self, local_path, task_key, image_index, task_name):
         if not self.is_initialized: return

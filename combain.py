@@ -388,6 +388,9 @@ class TranslationApp:
         self.image_gallery_frame = None
         self.continue_button = None
         self.image_control_active = threading.Event()
+        self.command_listener_thread = None
+        self.stop_command_listener = threading.Event()
+        self.image_id_to_path_map = {}
         
         # Словники для відповідності тем
         self.theme_map_to_display = {
@@ -482,6 +485,47 @@ class TranslationApp:
         for button in self.skip_image_buttons:
             if button:
                 self.root.after(0, lambda b=button: b.config(state="disabled"))
+                
+    def _command_listener_worker(self):
+        self.firebase_api.listen_for_commands(self._handle_firebase_command)
+
+    def _handle_firebase_command(self, event):
+        if self.is_shutting_down or event.path == "/" and event.data is None:
+            return
+
+        # Обробляємо тільки нові команди (подія 'put')
+        if event.event_type == 'put' and event.path != '/':
+            command_id = event.path.strip('/')
+            command_data = event.data
+            logger.info(f"Firebase -> Отримано команду: {command_id} з даними: {command_data}")
+
+            # Видаляємо команду після обробки
+            self.firebase_api.commands_ref.child(command_id).delete()
+
+            command = command_data.get("command")
+            image_id = command_data.get("imageId")
+
+            if command == "delete":
+                self.root.after(0, self._delete_image_by_id, image_id)
+            elif command == "regenerate":
+                new_prompt = command_data.get("newPrompt") # Може бути None
+                self.root.after(0, self._regenerate_image_by_id, image_id, new_prompt)
+
+    def _delete_image_by_id(self, image_id):
+        if image_id in self.image_id_to_path_map:
+            path = self.image_id_to_path_map[image_id]
+            logger.info(f"Виконання команди 'delete' для {image_id} (шлях: {path})")
+            self._delete_image(path) # Ця функція вже оновлена для роботи з Firebase
+        else:
+            logger.warning(f"Не вдалося знайти локальний шлях для зображення ID {image_id}")
+    
+    def _regenerate_image_by_id(self, image_id, new_prompt=None):
+        if image_id in self.image_id_to_path_map:
+            path = self.image_id_to_path_map[image_id]
+            logger.info(f"Виконання команди 'regenerate' для {image_id} (шлях: {path})")
+            self._regenerate_image(path, new_prompt=new_prompt, use_random_seed=not new_prompt)
+        else:
+            logger.warning(f"Не вдалося знайти локальний шлях для регенерації зображення ID {image_id}")
 
     def on_closing(self):
         # 1. Вмикаємо "режим тиші"
@@ -524,10 +568,15 @@ class TranslationApp:
         except Exception as e:
             logger.error(f"Помилка при очищенні папки 'preview': {e}")
 
-        # 2. Очищуємо логи та зображення в Firebase в самому кінці
+        # 2. Зупиняємо слухач команд та очищуємо Firebase
+        self.stop_command_listener.set()
+        if self.command_listener_thread:
+            self.command_listener_thread.join(timeout=2)
+
         if hasattr(self, 'firebase_api') and self.firebase_api.is_initialized:
             self.firebase_api.clear_logs()
             self.firebase_api.clear_images()
+            self.firebase_api.clear_commands()
             time.sleep(1) # Невелика затримка, щоб запити напевно пішли
 
         logger.info("Програму закрито.")
@@ -865,6 +914,9 @@ class TranslationApp:
                 self.root.after(0, self._add_image_to_gallery, image_path, task_key)
                 if self.firebase_api.is_initialized:
                     task_name = data['task'].get('task_name', f"Task {task_key[0]}")
+                    task_index, lang_code = task_key
+                    image_id = f"task{task_index}_{lang_code}_img{i}"
+                    self.image_id_to_path_map[image_id] = image_path # Зберігаємо шлях
                     self.firebase_api.upload_and_add_image_in_thread(image_path, task_key, i, task_name)
 
                 status_key = f"{task_key[0]}_{task_key[1]}"
@@ -964,6 +1016,7 @@ class TranslationApp:
             self.continue_button.pack(pady=10, side='bottom')
             
         self.image_control_active.clear()
+        self.image_id_to_path_map.clear() # Очищуємо мапу на початку
 
     def _add_image_to_gallery(self, image_path, task_key):
         container_info = self.gallery_lang_containers.get(task_key)
@@ -1097,6 +1150,12 @@ class TranslationApp:
         else:
             self.is_processing_queue = True
         
+        # Запускаємо прослуховування команд з Firebase
+        if self.firebase_api.is_initialized:
+            self.stop_command_listener.clear()
+            self.command_listener_thread = threading.Thread(target=self._command_listener_worker, daemon=True)
+            self.command_listener_thread.start()
+
         self._update_button_states(is_processing=True, is_image_stuck=False)
 
         try:
@@ -2395,6 +2454,12 @@ class TranslationApp:
                 if image_path in self.image_widgets:
                     self.image_widgets[image_path].destroy()
                     del self.image_widgets[image_path]
+                
+                # Також видаляємо з Firebase
+                image_id_to_remove = next((id for id, path in self.image_id_to_path_map.items() if path == image_path), None)
+                if image_id_to_remove and self.firebase_api.is_initialized:
+                    self.firebase_api.delete_image_from_db(image_id_to_remove)
+                    self.firebase_api.delete_image_from_storage(image_id_to_remove)
         except Exception as e:
             logger.error(f"Failed to delete image {image_path}: {e}")
             messagebox.showerror("Помилка", f"Не вдалося видалити зображення:\n{e}")
