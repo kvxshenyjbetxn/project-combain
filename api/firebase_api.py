@@ -1,8 +1,7 @@
 # api/firebase_api.py
 
 import logging
-import firebase_admin
-from firebase_admin import credentials, db, storage
+import pyrebase
 import os
 import datetime
 import threading
@@ -14,8 +13,12 @@ logger = logging.getLogger("TranslationApp")
 class FirebaseAPI:
     def __init__(self, config):
         self.is_initialized = False
-        self.bucket = None
+        self.auth = None
+        self.db = None
+        self.storage = None
+        self.user = None
         self.user_id = None
+        
         try:
             firebase_config = config.get("firebase", {})
             db_url = firebase_config.get("database_url")
@@ -29,43 +32,129 @@ class FirebaseAPI:
             if storage_bucket.startswith("gs://"):
                 storage_bucket = storage_bucket[5:]
 
-            base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            cred_path = os.path.join(base_path, 'firebase-credentials.json')
+            # Публічна конфігурація Firebase (безпечна для розповсюдження)
+            firebase_client_config = {
+                "apiKey": firebase_config.get("api_key", ""),
+                "authDomain": firebase_config.get("auth_domain", ""),
+                "databaseURL": db_url,
+                "projectId": firebase_config.get("project_id", ""),
+                "storageBucket": storage_bucket,
+                "messagingSenderId": firebase_config.get("messaging_sender_id", ""),
+                "appId": firebase_config.get("app_id", "")
+            }
 
-            if not os.path.exists(cred_path):
-                logger.warning(f"Firebase -> Файл '{cred_path}' не знайдено. Інтеграція вимкнена.")
+            # Ініціалізуємо клієнтський Firebase SDK
+            firebase = pyrebase.initialize_app(firebase_client_config)
+            self.auth = firebase.auth()
+            self.db = firebase.database()
+            self.storage = firebase.storage()
+
+            # Логіка отримання або створення User ID
+            self.user_id = self._get_or_create_user(config)
+            
+            if not self.user_id:
+                logger.error("Firebase -> Не вдалося отримати/створити користувача")
                 return
-
-            cred = credentials.Certificate(cred_path)
-            
-            if not firebase_admin._apps:
-                firebase_admin.initialize_app(cred, {
-                    'databaseURL': db_url,
-                    'storageBucket': storage_bucket
-                })
-            
-            self.bucket = storage.bucket()
-            
-            # Автоматична генерація або отримання збереженого User ID
-            self.user_id = self._get_or_generate_user_id(config)
             
             # Створення шляхів з урахуванням user_id
-            self.base_path = f"users/{self.user_id}" if self.user_id else "users/default"
-            self.logs_ref = db.reference(f'{self.base_path}/logs')
-            self.images_ref = db.reference(f'{self.base_path}/images')
-            self.commands_ref = db.reference(f'{self.base_path}/commands')
+            self.base_path = f"users/{self.user_id}"
+            self.logs_ref = f'{self.base_path}/logs'
+            self.images_ref = f'{self.base_path}/images'
+            self.commands_ref = f'{self.base_path}/commands'
             self.is_initialized = True
-            logger.info("Firebase -> API успішно ініціалізовано.")
+            logger.info(f"Firebase -> API успішно ініціалізовано для користувача: {self.user_id}")
 
         except Exception as e:
             logger.error(f"Firebase -> КРИТИЧНА ПОМИЛКА ініціалізації: {e}", exc_info=True)
             self.is_initialized = False
 
+    def _get_or_create_user(self, config):
+        """Отримує або створює анонімного користувача Firebase."""
+        from utils.config_utils import save_config
+        
+        saved_user_info = config.get("user_settings", {}).get("firebase_user", {})
+        
+        if saved_user_info and 'refreshToken' in saved_user_info:
+            try:
+                # Оновлюємо токен, щоб впевнитись, що сесія активна
+                refreshed_user = self.auth.refresh(saved_user_info['refreshToken'])
+                
+                # Логуємо структуру відповіді для діагностики
+                logger.info(f"Firebase -> Структура відповіді refresh(): {list(refreshed_user.keys()) if refreshed_user else 'None'}")
+                
+                # Шукаємо user ID в різних можливих полях
+                user_id = None
+                if 'localId' in refreshed_user:
+                    user_id = refreshed_user['localId']
+                elif 'userId' in refreshed_user:
+                    user_id = refreshed_user['userId']
+                elif 'user_id' in refreshed_user:
+                    user_id = refreshed_user['user_id']
+                elif saved_user_info.get('localId'):
+                    # Якщо в refresh() немає ID, беремо з збереженої сесії
+                    user_id = saved_user_info['localId']
+                    refreshed_user['localId'] = user_id  # Додаємо для сумісності
+                
+                if user_id:
+                    self.user = refreshed_user
+                    # Оновлюємо збережену інформацію
+                    config['user_settings']['firebase_user'] = refreshed_user
+                    save_config(config)
+                    logger.info(f"Firebase -> Успішно відновлено сесію для User ID: {user_id}")
+                    return user_id
+                else:
+                    logger.warning(f"Firebase -> Не знайдено User ID в відповіді refresh()")
+                    raise Exception("Не знайдено User ID в відповіді")
+                    
+            except Exception as e:
+                logger.warning(f"Firebase -> Не вдалося відновити сесію, створюємо нову. Помилка: {e}")
+
+        # Якщо збереженої сесії немає або вона недійсна, створюємо нового анонімного користувача
+        try:
+            new_user = self.auth.sign_in_anonymous()
+            self.user = new_user
+            
+            if 'user_settings' not in config:
+                config['user_settings'] = {}
+            # Зберігаємо всю інформацію про користувача, включаючи refresh token
+            config['user_settings']['firebase_user'] = new_user
+            save_config(config)
+            
+            logger.info(f"Firebase -> Створено нового анонімного користувача. User ID: {self.user['localId']}")
+            return self.user['localId']
+        except Exception as e:
+            logger.error(f"Firebase -> Помилка створення анонімного користувача: {e}")
+            return None
+
+    def initialize_firebase_paths(self):
+        """Ініціалізує шляхи Firebase після створення користувача."""
+        try:
+            # Створення шляхів з урахуванням user_id
+            self.base_path = f"users/{self.user_id}" if self.user_id else "users/default"
+            self.logs_ref = f'{self.base_path}/logs'
+            self.images_ref = f'{self.base_path}/images'
+            self.commands_ref = f'{self.base_path}/commands'
+            self.is_initialized = True
+            logger.info(f"Firebase -> API успішно ініціалізовано для користувача: {self.user_id}")
+        except Exception as e:
+            logger.error(f"Firebase -> КРИТИЧНА ПОМИЛКА ініціалізації: {e}", exc_info=True)
+            self.is_initialized = False
+
+    def get_user_token(self):
+        """Безпечно отримує idToken користувача з різних можливих полів."""
+        if not self.user:
+            return None
+        return self.user.get('idToken') or self.user.get('id_token') or self.user.get('token')
+
     def send_log(self, message):
-        if not self.is_initialized: return
+        if not self.is_initialized or not self.user: return
         try:
             timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
-            self.logs_ref.push().set({'timestamp': timestamp, 'message': message})
+            token = self.get_user_token()
+            if not token:
+                logger.error("Firebase -> Не знайдено токен для аутентифікації")
+                return
+            self.db.child(self.logs_ref).push({'timestamp': timestamp, 'message': message}, token)
             logger.debug(f"Firebase -> Лог успішно надіслано: {message}")
         except Exception as e:
             logger.error(f"Firebase -> Помилка надсилання логу: {e}")
@@ -76,51 +165,48 @@ class FirebaseAPI:
         thread.start()
 
     def clear_logs(self):
-        if not self.is_initialized: return
+        if not self.is_initialized or not self.user: return
         try:
             logger.info("Firebase -> Очищення логів з бази даних...")
-            self.logs_ref.delete()
+            self.db.child(self.logs_ref).remove(self.get_user_token())
             logger.info("Firebase -> Логи успішно очищено.")
         except Exception as e:
             logger.error(f"Firebase -> Не вдалося очистити логи: {e}")
 
     def upload_image_and_get_url(self, local_path, remote_path):
-        if not self.is_initialized or not self.bucket:
+        if not self.is_initialized or not self.user:
             logger.error("Firebase Storage не ініціалізовано.")
             return None
         try:
             # Додаємо user_id до шляху Storage
             user_remote_path = f"{self.user_id}/{remote_path}"
-            blob = self.bucket.blob(user_remote_path)
-            content_type, _ = mimetypes.guess_type(local_path)
-            blob.upload_from_filename(local_path, content_type=content_type)
-            blob.make_public()
-            return blob.public_url
+            blob = self.storage.child(user_remote_path).put(local_path, self.get_user_token())
+            return self.storage.child(user_remote_path).get_url(blob['downloadTokens'])
         except Exception as e:
             logger.error(f"Firebase -> Помилка завантаження зображення '{local_path}': {e}", exc_info=True)
             return None
 
     def add_image_to_db(self, image_id, image_url, task_name, lang_code, prompt):
-        if not self.is_initialized: return
+        if not self.is_initialized or not self.user: return
         try:
             # Додаємо кеш-бастер до URL для запобігання кешуванню
             cache_buster = f"?v={int(time.time() * 1000)}"
             final_url = image_url + cache_buster
             
-            self.images_ref.child(image_id).set({
+            self.db.child(self.images_ref).child(image_id).set({
                 'id': image_id, 
                 'url': final_url,
                 'taskName': task_name,
                 'langCode': lang_code,
                 'prompt': prompt,
                 'timestamp': int(time.time() * 1000) # Час у мілісекундах для сортування
-            })
+            }, self.get_user_token())
             logger.info(f"Firebase -> Додано посилання на зображення в базу даних: {image_id}")
         except Exception as e:
             logger.error(f"Firebase -> Помилка додавання зображення в базу даних: {e}")
             
     def update_image_in_db(self, image_id, image_url):
-        if not self.is_initialized: return
+        if not self.is_initialized or not self.user: return
         try:
             # Створюємо унікальний "кеш-бастер" на основі часу
             cache_buster = f"?v={int(time.time() * 1000)}"
@@ -128,98 +214,102 @@ class FirebaseAPI:
                 'url': image_url + cache_buster, # Додаємо його до URL
                 # НЕ оновлюємо timestamp щоб зберегти оригінальну позицію
             }
-            self.images_ref.child(image_id).update(update_data)
+            self.db.child(self.images_ref).child(image_id).update(update_data, self.get_user_token())
             logger.info(f"Firebase -> Оновлено посилання на зображення в базі даних: {image_id}")
         except Exception as e:
             logger.error(f"Firebase -> Помилка оновлення зображення в базі даних: {e}")
             
     def clear_images(self):
         """Видаляє всі зображення з Storage та Realtime Database для поточного користувача."""
-        if not self.is_initialized:
+        if not self.is_initialized or not self.user:
             return
         try:
             # Видалення з Realtime Database
             logger.info(f"Firebase -> Очищення посилань на зображення з бази даних для користувача {self.user_id}...")
-            self.images_ref.delete()
+            self.db.child(self.images_ref).remove(self.get_user_token())
             logger.info("Firebase -> Посилання на зображення видалено.")
 
             # Видалення файлів зі Storage
-            if self.bucket:
-                logger.info(f"Firebase -> Очищення файлів зображень зі Storage для користувача {self.user_id}...")
-                blobs = self.bucket.list_blobs(prefix=f"{self.user_id}/gallery_images/")
-                for blob in blobs:
-                    blob.delete()
+            logger.info(f"Firebase -> Очищення файлів зображень зі Storage для користувача {self.user_id}...")
+            # Отримуємо список файлів для видалення
+            storage_path = f"{self.user_id}/gallery_images/"
+            try:
+                files = self.storage.list_files()
+                for file_path in files:
+                    if file_path.startswith(storage_path):
+                        self.storage.delete(file_path, self.get_user_token())
                 logger.info("Firebase -> Файли зображень зі Storage видалено.")
+            except Exception as storage_error:
+                logger.warning(f"Firebase -> Помилка очищення Storage: {storage_error}")
 
         except Exception as e:
             logger.error(f"Firebase -> Помилка під час очищення зображень: {e}")
 
     def delete_image_from_storage(self, image_id):
-        if not self.bucket: return False
+        if not self.is_initialized or not self.user: return False
         try:
-            blob = self.bucket.blob(f"gallery_images/{image_id}.jpg")
-            if blob.exists():
-                blob.delete()
-                logger.info(f"Firebase -> Зображення видалено зі Storage: {image_id}")
+            storage_path = f"{self.user_id}/gallery_images/{image_id}.jpg"
+            self.storage.delete(storage_path, self.get_user_token())
+            logger.info(f"Firebase -> Зображення видалено зі Storage: {image_id}")
             return True
         except Exception as e:
             logger.error(f"Firebase -> Помилка видалення зображення зі Storage: {e}")
             return False
 
     def delete_image_from_db(self, image_id):
-        if not self.is_initialized: return
+        if not self.is_initialized or not self.user: return
         try:
-            self.images_ref.child(image_id).delete()
+            self.db.child(self.images_ref).child(image_id).remove(self.get_user_token())
             logger.info(f"Firebase -> Запис про зображення видалено з БД: {image_id}")
         except Exception as e:
             logger.error(f"Firebase -> Помилка видалення запису з БД: {e}")
     
     def listen_for_commands(self, callback):
-        if not self.is_initialized: return
+        if not self.is_initialized or not self.user: return
         logger.info("Firebase -> Запуск прослуховування команд...")
-        self.commands_ref.listen(callback)
+        self.db.child(self.commands_ref).stream(callback, token=self.get_user_token())
 
     def clear_commands(self):
-        if not self.is_initialized: return
+        if not self.is_initialized or not self.user: return
         try:
-            self.commands_ref.delete()
+            self.db.child(self.commands_ref).remove(self.get_user_token())
             logger.info("Firebase -> Команди очищено.")
         except Exception as e:
             logger.error(f"Firebase -> Помилка очищення команд: {e}")
 
     def send_continue_montage_command(self):
         """Відправляє команду продовження монтажу."""
-        if not self.is_initialized: return
+        if not self.is_initialized or not self.user: return
         try:
-            self.commands_ref.push().set({
+            self.db.child(self.commands_ref).push({
                 'command': 'continue_montage',
                 'timestamp': int(time.time() * 1000)
-            })
+            }, self.get_user_token())
             logger.info("Firebase -> Відправлено команду продовження монтажу")
         except Exception as e:
             logger.error(f"Firebase -> Помилка відправки команди продовження монтажу: {e}")
 
     def send_montage_ready_status(self):
         """Відправляє статус готовності до монтажу."""
-        if not self.is_initialized: return
+        if not self.is_initialized or not self.user: return
         try:
             # Додаємо статус в окремий ref для відстеження готовності
-            db.reference(f'users/{self.user_id}/status').set({
+            self.db.child(f'users/{self.user_id}/status').set({
                 'montage_ready': True,
                 'timestamp': int(time.time() * 1000)
-            })
+            }, self.get_user_token())
             logger.info("Firebase -> Відправлено статус готовності до монтажу")
         except Exception as e:
             logger.error(f"Firebase -> Помилка відправки статусу готовності: {e}")
 
     def clear_montage_ready_status(self):
         """Очищає статус готовності до монтажу."""
-        if not self.is_initialized: return
+        if not self.is_initialized or not self.user: return
         try:
-            db.reference(f'users/{self.user_id}/status').set({
+            self.db.child(f'users/{self.user_id}/status').set({
                 'montage_ready': False,
                 'timestamp': int(time.time() * 1000)
-            })
+            }, self.get_user_token())
             logger.info("Firebase -> Очищено статус готовності до монтажу")
         except Exception as e:
             logger.error(f"Firebase -> Помилка очищення статусу готовності: {e}")
@@ -274,20 +364,20 @@ class FirebaseAPI:
 
     def send_montage_ready_status(self):
         """Відправляє статус готовності до монтажу."""
-        if not self.is_initialized: return
+        if not self.is_initialized or not self.user: return
         try:
-            status_ref = db.reference(f'users/{self.user_id}/status')
-            status_ref.child('montage_ready').set(True)
+            status_ref = f'users/{self.user_id}/status'
+            self.db.child(status_ref).child('montage_ready').set(True, self.get_user_token())
             logger.info("Firebase -> Відправлено статус готовності до монтажу")
         except Exception as e:
             logger.error(f"Firebase -> Помилка відправки статусу готовності: {e}")
 
     def clear_montage_ready_status(self):
         """Очищає статус готовності до монтажу."""
-        if not self.is_initialized: return
+        if not self.is_initialized or not self.user: return
         try:
-            status_ref = db.reference(f'users/{self.user_id}/status')
-            status_ref.child('montage_ready').set(False)
+            status_ref = f'users/{self.user_id}/status'
+            self.db.child(status_ref).child('montage_ready').set(False, self.get_user_token())
             logger.info("Firebase -> Очищено статус готовності до монтажу")
         except Exception as e:
             logger.error(f"Firebase -> Помилка очищення статусу готовності: {e}")
@@ -297,17 +387,17 @@ class FirebaseAPI:
         if not self.is_initialized: return
         self.user_id = new_user_id if new_user_id else "default"
         self.base_path = f"users/{self.user_id}"
-        self.logs_ref = db.reference(f'{self.base_path}/logs')
-        self.images_ref = db.reference(f'{self.base_path}/images')
-        self.commands_ref = db.reference(f'{self.base_path}/commands')
+        self.logs_ref = f'{self.base_path}/logs'
+        self.images_ref = f'{self.base_path}/images'
+        self.commands_ref = f'{self.base_path}/commands'
         logger.info(f"Firebase -> User ID оновлено на: {self.user_id}")
 
     def clear_user_logs(self):
         """Очищення логів тільки для поточного користувача."""
-        if not self.is_initialized: return
+        if not self.is_initialized or not self.user: return
         try:
             logger.info(f"Firebase -> Очищення логів для користувача {self.user_id}...")
-            self.logs_ref.delete()
+            self.db.child(self.logs_ref).remove(self.get_user_token())
             logger.info(f"Firebase -> Логи для користувача {self.user_id} успішно очищено.")
             return True
         except Exception as e:
@@ -316,19 +406,23 @@ class FirebaseAPI:
 
     def clear_user_images(self):
         """Очищення галереї тільки для поточного користувача."""
-        if not self.is_initialized: return
+        if not self.is_initialized or not self.user: return
         try:
             # Очищення Database записів
             logger.info(f"Firebase -> Очищення зображень для користувача {self.user_id}...")
-            self.images_ref.delete()
+            self.db.child(self.images_ref).remove(self.get_user_token())
             
             # Очищення Storage файлів
-            if self.bucket:
-                logger.info(f"Firebase -> Очищення файлів Storage для користувача {self.user_id}...")
-                blobs = self.bucket.list_blobs(prefix=f"{self.user_id}/gallery_images/")
-                for blob in blobs:
-                    blob.delete()
+            logger.info(f"Firebase -> Очищення файлів Storage для користувача {self.user_id}...")
+            try:
+                storage_path = f"{self.user_id}/gallery_images/"
+                files = self.storage.list_files()
+                for file_path in files:
+                    if file_path.startswith(storage_path):
+                        self.storage.delete(file_path, self.get_user_token())
                 logger.info(f"Firebase -> Файли Storage для користувача {self.user_id} видалено.")
+            except Exception as storage_error:
+                logger.warning(f"Firebase -> Помилка очищення Storage: {storage_error}")
             
             logger.info(f"Firebase -> Зображення для користувача {self.user_id} успішно очищено.")
             return True
@@ -338,13 +432,18 @@ class FirebaseAPI:
 
     def get_user_stats(self):
         """Отримання статистики тільки для поточного користувача."""
-        if not self.is_initialized: return {"logs": 0, "images": 0}
+        if not self.is_initialized or not self.user: return {"logs": 0, "images": 0}
         try:
-            logs_snapshot = self.logs_ref.get()
-            images_snapshot = self.images_ref.get()
+            token = self.get_user_token()
+            if not token:
+                logger.error("Firebase -> Не знайдено токен для отримання статистики")
+                return {"logs": 0, "images": 0}
             
-            logs_count = len(logs_snapshot) if logs_snapshot else 0
-            images_count = len(images_snapshot) if images_snapshot else 0
+            logs_snapshot = self.db.child(self.logs_ref).get(token=token)
+            images_snapshot = self.db.child(self.images_ref).get(token=token)
+            
+            logs_count = len(logs_snapshot.val() or {})
+            images_count = len(images_snapshot.val() or {})
             
             return {
                 "user_id": self.user_id,
@@ -355,49 +454,18 @@ class FirebaseAPI:
             logger.error(f"Firebase -> Помилка отримання статистики для користувача {self.user_id}: {e}")
             return {"logs": 0, "images": 0}
 
-    def _get_or_generate_user_id(self, config):
-        """Отримує збережений User ID або генерує новий автоматично."""
-        from utils.config_utils import save_config
-        
-        # Перевіряємо чи є збережений User ID
-        saved_user_id = config.get("user_settings", {}).get("user_id", "")
-        if saved_user_id:
-            logger.info(f"Firebase -> Використовується збережений User ID: {saved_user_id}")
-            return saved_user_id
-        
-        # Генеруємо новий User ID
-        try:
-            users_ref = db.reference('users')
-            users_snapshot = users_ref.get()
-            
-            # Знаходимо найбільший існуючий числовий ID
-            max_id = 0
-            if users_snapshot:
-                for user_id in users_snapshot.keys():
-                    try:
-                        numeric_id = int(user_id)
-                        max_id = max(max_id, numeric_id)
-                    except ValueError:
-                        # Ігноруємо не-числові ID
-                        continue
-            
-            # Генеруємо новий ID
-            new_user_id = str(max_id + 1)
-            
-            # Зберігаємо в конфігурації
-            if 'user_settings' not in config:
-                config['user_settings'] = {}
-            config['user_settings']['user_id'] = new_user_id
-            save_config(config)
-            
-            logger.info(f"Firebase -> Згенеровано новий User ID: {new_user_id}")
-            return new_user_id
-            
-        except Exception as e:
-            logger.error(f"Firebase -> Помилка генерації User ID: {e}")
-            # Fallback до "default"
-            return "default"
-
     def get_current_user_id(self):
         """Повертає поточний User ID."""
         return self.user_id
+
+    def refresh_user_token(self):
+        """Оновлює токен користувача."""
+        if not self.is_initialized or not self.user:
+            return False
+        try:
+            self.user = self.auth.refresh(self.user['refreshToken'])
+            logger.debug("Firebase -> Токен користувача оновлено")
+            return True
+        except Exception as e:
+            logger.error(f"Firebase -> Помилка оновлення токена: {e}")
+            return False

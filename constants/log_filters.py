@@ -24,7 +24,10 @@ TECHNICAL_MESSAGES = [
     "[Audio/Subs Master] Starting pipeline.",
     "[Montage Progress] Завантаження моделі Whisper (base)...",
     "Firebase -> Отримано команду продовження монтажу з мобільного додатку",
-    "Video concatenation successful."
+    "Video concatenation successful.",
+    "Firebase -> Структура відповіді refresh(): ['userId', 'idToken', 'refreshToken']",
+    "Found system-wide ffmpeg in PATH.",
+    "Firebase -> Помилка очищення Storage: 'Storage' object has no attribute 'bucket'"
 ]
 
 # Префікси повідомлень, які фільтруються з GUI
@@ -39,7 +42,11 @@ TECHNICAL_MESSAGE_PREFIXES = [
     "Whisper -> Запит на завантаження моделі:",
     "[Montage Progress] Генерація .ass для",
     "Субтитри -> Початок транскрибації файлу:",
-    "Firebase -> Обробка команди з черги:"
+    "Firebase -> Обробка команди з черги:",
+    "Firebase -> Очищення посилань на зображення з бази даних для користувача",
+    "Firebase -> Очищення файлів зображень зі Storage для користувача",
+    "Firebase -> Успішно відновлено сесію для User ID:",
+    "Firebase -> Очищення логів для користувача"
 ]
 
 # Додаткові префікси повідомлень, які не відправляються в Firebase (мобільний додаток), 

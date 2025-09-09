@@ -5,5 +5,5 @@ openai-whisper
 ffmpeg-python
 numpy
 yt-dlp
-firebase-admin
+pyrebase4
 google-cloud-storage

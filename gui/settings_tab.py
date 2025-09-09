@@ -48,10 +48,12 @@ def create_api_settings_subtabs(parent_tab, app):
     or_tab = ttk.Frame(api_notebook)
     audio_tab = ttk.Frame(api_notebook)
     image_tab = ttk.Frame(api_notebook)
+    firebase_tab = ttk.Frame(api_notebook)
 
     api_notebook.add(or_tab, text=app._t('openrouter_tab_label'))
     api_notebook.add(audio_tab, text=app._t('audio_tab_label'))
     api_notebook.add(image_tab, text=app._t('image_tab_label'))
+    api_notebook.add(firebase_tab, text="Firebase")
 
     # --- OpenRouter Settings ---
     _, or_scroll_frame = app._create_scrollable_tab(or_tab)
@@ -221,6 +223,65 @@ def create_api_settings_subtabs(parent_tab, app):
     recraft_negative_prompt_entry = ttk.Entry(recraft_frame, textvariable=app.recraft_negative_prompt_var)
     recraft_negative_prompt_entry.grid(row=6, column=1, sticky='ew', padx=5, pady=5)
     add_text_widget_bindings(app, recraft_negative_prompt_entry)
+
+    # --- Firebase Settings ---
+    create_firebase_settings_tab(firebase_tab, app)
+
+def create_firebase_settings_tab(parent_tab, app):
+    """Створює вкладку з налаштуваннями Firebase."""
+    _, firebase_scroll_frame = app._create_scrollable_tab(parent_tab)
+    
+    # Основні налаштування Firebase
+    firebase_frame = ttk.Labelframe(firebase_scroll_frame, text="Firebase Connection")
+    firebase_frame.pack(fill='x', padx=10, pady=5)
+    firebase_frame.grid_columnconfigure(1, weight=1)
+    
+    # User ID для синхронізації
+    ttk.Label(firebase_frame, text="Your User ID:", font=('TkDefaultFont', 10, 'bold')).grid(row=0, column=0, sticky='w', padx=5, pady=5)
+    user_id = getattr(app.firebase_api, 'user_id', 'Not available')
+    app.firebase_user_id_var = tk.StringVar(value=user_id)
+    user_id_entry = ttk.Entry(firebase_frame, textvariable=app.firebase_user_id_var, state='readonly', width=30)
+    user_id_entry.grid(row=0, column=1, sticky='w', padx=5, pady=5)
+    
+    # Кнопка копіювання
+    def copy_user_id():
+        app.root.clipboard_clear()
+        app.root.clipboard_append(user_id)
+        print(f"[INFO] User ID '{user_id}' скопійовано в буфер обміну!")
+    
+    ttk.Button(firebase_frame, text="Copy", command=copy_user_id, bootstyle="info-outline").grid(row=0, column=2, padx=5, pady=5)
+    
+    # Інструкції
+    instructions = ttk.Label(firebase_frame, 
+                           text="📱 Щоб підключити мобільний додаток:\n1. Скопіюйте ваш User ID\n2. Введіть його в мобільному додатку\n3. Дані будуть синхронізовані автоматично",
+                           font=('TkDefaultFont', 9),
+                           foreground='gray')
+    instructions.grid(row=1, column=0, columnspan=3, sticky='w', padx=5, pady=(10, 5))
+    
+    # Статистика
+    stats_frame = ttk.Labelframe(firebase_scroll_frame, text="Statistics")
+    stats_frame.pack(fill='x', padx=10, pady=5)
+    stats_frame.grid_columnconfigure(1, weight=1)
+    
+    app.firebase_logs_stat_var = tk.StringVar(value="Loading...")
+    app.firebase_images_stat_var = tk.StringVar(value="Loading...")
+    
+    ttk.Label(stats_frame, text="Logs:").grid(row=0, column=0, sticky='w', padx=5, pady=2)
+    ttk.Label(stats_frame, textvariable=app.firebase_logs_stat_var).grid(row=0, column=1, sticky='w', padx=5, pady=2)
+    
+    ttk.Label(stats_frame, text="Images:").grid(row=1, column=0, sticky='w', padx=5, pady=2)
+    ttk.Label(stats_frame, textvariable=app.firebase_images_stat_var).grid(row=1, column=1, sticky='w', padx=5, pady=2)
+    
+    # Кнопки керування
+    control_frame = ttk.Labelframe(firebase_scroll_frame, text="Data Management")
+    control_frame.pack(fill='x', padx=10, pady=5)
+    
+    ttk.Button(control_frame, text="Clear Logs", command=app.clear_firebase_logs, bootstyle="warning-outline").pack(side=tk.LEFT, padx=5, pady=5)
+    ttk.Button(control_frame, text="Clear Images", command=app.clear_firebase_images, bootstyle="danger-outline").pack(side=tk.LEFT, padx=5, pady=5)
+    ttk.Button(control_frame, text="Refresh Stats", command=app.refresh_firebase_stats, bootstyle="secondary-outline").pack(side=tk.LEFT, padx=5, pady=5)
+    
+    # Оновлюємо статистику при відкритті
+    app.refresh_firebase_stats()
 
 def create_language_settings_tab(parent_tab, app):
     canvas, scrollable_frame = app._create_scrollable_tab(parent_tab)

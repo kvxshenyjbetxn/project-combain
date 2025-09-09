@@ -3807,6 +3807,64 @@ class TranslationApp:
         elif hasattr(self, 'user_stats_label'):
             self.user_stats_label.config(text=f"Користувач: {user_id} | Помилка завантаження статистики")
 
+    def refresh_firebase_stats(self):
+        """Оновлює статистику Firebase."""
+        if not hasattr(self, 'firebase_api') or not self.firebase_api or not self.firebase_api.is_initialized:
+            if hasattr(self, 'firebase_logs_stat_var'):
+                self.firebase_logs_stat_var.set("Firebase not connected")
+            if hasattr(self, 'firebase_images_stat_var'):
+                self.firebase_images_stat_var.set("Firebase not connected")
+            return
+            
+        try:
+            stats = self.firebase_api.get_user_stats()
+            if stats:
+                if hasattr(self, 'firebase_logs_stat_var'):
+                    self.firebase_logs_stat_var.set(str(stats['logs']))
+                if hasattr(self, 'firebase_images_stat_var'):
+                    self.firebase_images_stat_var.set(str(stats['images']))
+                if hasattr(self, 'firebase_user_id_var'):
+                    self.firebase_user_id_var.set(self.firebase_api.get_current_user_id() or "Not available")
+            else:
+                if hasattr(self, 'firebase_logs_stat_var'):
+                    self.firebase_logs_stat_var.set("Error loading")
+                if hasattr(self, 'firebase_images_stat_var'):
+                    self.firebase_images_stat_var.set("Error loading")
+        except Exception as e:
+            print(f"Error refreshing Firebase stats: {e}")
+            if hasattr(self, 'firebase_logs_stat_var'):
+                self.firebase_logs_stat_var.set("Error")
+            if hasattr(self, 'firebase_images_stat_var'):
+                self.firebase_images_stat_var.set("Error")
+
+    def clear_firebase_logs(self):
+        """Очищає логи Firebase."""
+        if not hasattr(self, 'firebase_api') or not self.firebase_api or not self.firebase_api.is_initialized:
+            messagebox.showerror("Error", "Firebase not connected!")
+            return
+            
+        if messagebox.askyesno("Confirm", "Clear all your logs from Firebase?\n\nThis action cannot be undone!"):
+            success = self.firebase_api.clear_user_logs()
+            if success:
+                self.refresh_firebase_stats()
+                messagebox.showinfo("Success", "Your logs have been cleared!")
+            else:
+                messagebox.showerror("Error", "Failed to clear logs!")
+
+    def clear_firebase_images(self):
+        """Очищає зображення Firebase."""
+        if not hasattr(self, 'firebase_api') or not self.firebase_api or not self.firebase_api.is_initialized:
+            messagebox.showerror("Error", "Firebase not connected!")
+            return
+            
+        if messagebox.askyesno("Confirm", "Clear all your images from Firebase?\n\nThis action cannot be undone!"):
+            success = self.firebase_api.clear_user_images()
+            if success:
+                self.refresh_firebase_stats()
+                messagebox.showinfo("Success", "Your images have been cleared!")
+            else:
+                messagebox.showerror("Error", "Failed to clear images!")
+
 if __name__ == "__main__":
     """Main entry point for the Content Translation and Generation Application.
     
