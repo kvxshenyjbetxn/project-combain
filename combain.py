@@ -1213,6 +1213,7 @@ class TranslationApp:
             self.stop_command_listener.clear()
             # Clear previous commands and images before starting new session
             self.firebase_api.clear_commands()
+            self.firebase_api.clear_montage_ready_status()  # Clear montage ready status
             
             if self.config.get("firebase", {}).get("auto_clear_gallery", True):
                 self.firebase_api.clear_images()  # Clear old gallery images
@@ -1375,6 +1376,9 @@ class TranslationApp:
             if self.config.get("ui_settings", {}).get("image_control_enabled", False) and should_gen_images:
                 self.update_progress(self._t('phase_3_image_control'))
                 logger.info("Гібридний режим -> Етап 3: Пауза для налаштування зображень користувачем.")
+                
+                # Відправляємо статус готовності до монтажу в Firebase
+                self.firebase_api.send_montage_ready_status()
                 
                 # Надсилаємо повідомлення в Telegram
                 self.tg_api.send_message_with_buttons(
@@ -2512,6 +2516,9 @@ class TranslationApp:
     def continue_processing_after_image_control(self):
         logger.info("Continue button pressed. Resuming final video processing. Gallery remains visible.")
         
+        # Очищуємо статус готовності до монтажу
+        self.firebase_api.clear_montage_ready_status()
+        
         # Більше не ховаємо галерею. Вона залишиться видимою.
         # Код для приховування видалено.
         
@@ -2524,6 +2531,9 @@ class TranslationApp:
     def _continue_montage_from_mobile(self):
         """Обробляє команду продовження монтажу з мобільного додатку."""
         logger.info("Продовження монтажу з мобільного додатку.")
+        
+        # Очищуємо статус готовності до монтажу
+        self.firebase_api.clear_montage_ready_status()
         
         # Ховаємо кнопку "Продовжити", якщо вона є
         if self.continue_button and self.continue_button.winfo_ismapped():

@@ -190,6 +190,31 @@ class FirebaseAPI:
         except Exception as e:
             logger.error(f"Firebase -> Помилка відправки команди продовження монтажу: {e}")
 
+    def send_montage_ready_status(self):
+        """Відправляє статус готовності до монтажу."""
+        if not self.is_initialized: return
+        try:
+            # Додаємо статус в окремий ref для відстеження готовності
+            db.reference('status').set({
+                'montage_ready': True,
+                'timestamp': int(time.time() * 1000)
+            })
+            logger.info("Firebase -> Відправлено статус готовності до монтажу")
+        except Exception as e:
+            logger.error(f"Firebase -> Помилка відправки статусу готовності: {e}")
+
+    def clear_montage_ready_status(self):
+        """Очищає статус готовності до монтажу."""
+        if not self.is_initialized: return
+        try:
+            db.reference('status').set({
+                'montage_ready': False,
+                'timestamp': int(time.time() * 1000)
+            })
+            logger.info("Firebase -> Очищено статус готовності до монтажу")
+        except Exception as e:
+            logger.error(f"Firebase -> Помилка очищення статусу готовності: {e}")
+
     def upload_and_add_image_in_thread(self, local_path, task_key, image_index, task_name, prompt, callback=None):
         if not self.is_initialized: return None
         
