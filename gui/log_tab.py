@@ -4,7 +4,7 @@ import logging
 import re
 
 from .gui_utils import add_text_widget_bindings
-from constants.log_filters import is_technical_message
+from constants.log_filters import is_technical_message, should_send_to_firebase
 
 # Отримуємо існуючий логер, створений у головному файлі
 logger = logging.getLogger("TranslationApp")
@@ -132,10 +132,14 @@ def create_log_tab(notebook, app):
                 # Технічні повідомлення записуються тільки в файловий лог, не показуємо в GUI і не відправляємо в Firebase
                 return
 
-            # Відправляємо лог у Firebase, ТІЛЬКИ ЯКЩО програма не в процесі закриття
-            if hasattr(self.app, 'firebase_api') and self.app.firebase_api.is_initialized and not self.app.is_shutting_down:
+            # Відправляємо лог у Firebase тільки якщо це дозволено фільтром та програма не закривається
+            if (should_send_to_firebase(msg) and 
+                hasattr(self.app, 'firebase_api') and 
+                self.app.firebase_api.is_initialized and 
+                not self.app.is_shutting_down):
                 self.app.firebase_api.send_log_in_thread(msg)
 
+            # Показуємо повідомлення в GUI (всі не-технічні повідомлення)
             def append_text():
                 self.main_text_widget.configure(state='normal')
                 self.main_text_widget.insert(tk.END, msg + '\n')

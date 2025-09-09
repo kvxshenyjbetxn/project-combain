@@ -18,6 +18,13 @@ TECHNICAL_MESSAGES = [
     "Firebase -> Очищено статус готовності до монтажу",
     "Cleared montage ready status on application startup",
     "Firebase -> Відправлено статус готовності до монтажу",
+    "Firebase -> Команди очищено.",
+    "Firebase -> Запуск прослуховування команд...",
+    "[Hybrid Mode] Image Master Thread: Starting sequential image generation.",
+    "[Audio/Subs Master] Starting pipeline.",
+    "[Montage Progress] Завантаження моделі Whisper (base)...",
+    "Firebase -> Отримано команду продовження монтажу з мобільного додатку",
+    "Video concatenation successful."
 ]
 
 # Префікси повідомлень, які фільтруються з GUI
@@ -28,6 +35,17 @@ TECHNICAL_MESSAGE_PREFIXES = [
     "Firebase -> Видалено зображення зі Storage:",
     "Firebase -> Зображення видалено зі Storage:",
     "Firebase -> Лог успішно надіслано:",
+    "Збережено мапування:",
+    "Whisper -> Запит на завантаження моделі:",
+    "[Montage Progress] Генерація .ass для",
+    "Субтитри -> Початок транскрибації файлу:",
+    "Firebase -> Обробка команди з черги:"
+]
+
+# Додаткові префікси повідомлень, які не відправляються в Firebase (мобільний додаток), 
+# але показуються в десктопному GUI
+FIREBASE_FILTER_PREFIXES = [
+    "Прогрес:",  # Детальний прогрес монтажу відео (FPS, бітрейт, тощо)
 ]
 
 def is_technical_message(message):
@@ -50,6 +68,27 @@ def is_technical_message(message):
             return True
     
     return False
+
+def should_send_to_firebase(message):
+    """
+    Перевіряє чи потрібно відправляти повідомлення в Firebase (мобільний додаток).
+    
+    Args:
+        message (str): Повідомлення для перевірки
+        
+    Returns:
+        bool: True якщо повідомлення потрібно відправити в Firebase
+    """
+    # Спочатку перевіряємо чи це не технічне повідомлення (вони взагалі не показуються)
+    if is_technical_message(message):
+        return False
+    
+    # Перевіряємо чи це повідомлення, яке не варто відправляти в Firebase
+    for prefix in FIREBASE_FILTER_PREFIXES:
+        if message.startswith(prefix):
+            return False
+    
+    return True
 
 def add_technical_message(message):
     """
