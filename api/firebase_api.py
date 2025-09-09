@@ -15,6 +15,7 @@ class FirebaseAPI:
     def __init__(self, config):
         self.is_initialized = False
         self.bucket = None
+        self.user_id = None
         try:
             firebase_config = config.get("firebase", {})
             db_url = firebase_config.get("database_url")
@@ -43,10 +44,16 @@ class FirebaseAPI:
                     'storageBucket': storage_bucket
                 })
             
-            self.logs_ref = db.reference('logs')
-            self.images_ref = db.reference('images')
-            self.commands_ref = db.reference('commands')
             self.bucket = storage.bucket()
+            
+            # Автоматична генерація або отримання збереженого User ID
+            self.user_id = self._get_or_generate_user_id(config)
+            
+            # Створення шляхів з урахуванням user_id
+            self.base_path = f"users/{self.user_id}" if self.user_id else "users/default"
+            self.logs_ref = db.reference(f'{self.base_path}/logs')
+            self.images_ref = db.reference(f'{self.base_path}/images')
+            self.commands_ref = db.reference(f'{self.base_path}/commands')
             self.is_initialized = True
             logger.info("Firebase -> API успішно ініціалізовано.")
 
@@ -82,7 +89,9 @@ class FirebaseAPI:
             logger.error("Firebase Storage не ініціалізовано.")
             return None
         try:
-            blob = self.bucket.blob(remote_path)
+            # Додаємо user_id до шляху Storage
+            user_remote_path = f"{self.user_id}/{remote_path}"
+            blob = self.bucket.blob(user_remote_path)
             content_type, _ = mimetypes.guess_type(local_path)
             blob.upload_from_filename(local_path, content_type=content_type)
             blob.make_public()
@@ -125,19 +134,19 @@ class FirebaseAPI:
             logger.error(f"Firebase -> Помилка оновлення зображення в базі даних: {e}")
             
     def clear_images(self):
-        """Видаляє всі зображення з Storage та Realtime Database."""
+        """Видаляє всі зображення з Storage та Realtime Database для поточного користувача."""
         if not self.is_initialized:
             return
         try:
             # Видалення з Realtime Database
-            logger.info("Firebase -> Очищення посилань на зображення з бази даних...")
+            logger.info(f"Firebase -> Очищення посилань на зображення з бази даних для користувача {self.user_id}...")
             self.images_ref.delete()
             logger.info("Firebase -> Посилання на зображення видалено.")
 
             # Видалення файлів зі Storage
             if self.bucket:
-                logger.info("Firebase -> Очищення файлів зображень зі Storage...")
-                blobs = self.bucket.list_blobs(prefix="gallery_images/")
+                logger.info(f"Firebase -> Очищення файлів зображень зі Storage для користувача {self.user_id}...")
+                blobs = self.bucket.list_blobs(prefix=f"{self.user_id}/gallery_images/")
                 for blob in blobs:
                     blob.delete()
                 logger.info("Firebase -> Файли зображень зі Storage видалено.")
@@ -195,7 +204,7 @@ class FirebaseAPI:
         if not self.is_initialized: return
         try:
             # Додаємо статус в окремий ref для відстеження готовності
-            db.reference('status').set({
+            db.reference(f'users/{self.user_id}/status').set({
                 'montage_ready': True,
                 'timestamp': int(time.time() * 1000)
             })
@@ -207,7 +216,7 @@ class FirebaseAPI:
         """Очищає статус готовності до монтажу."""
         if not self.is_initialized: return
         try:
-            db.reference('status').set({
+            db.reference(f'users/{self.user_id}/status').set({
                 'montage_ready': False,
                 'timestamp': int(time.time() * 1000)
             })
@@ -253,8 +262,8 @@ class FirebaseAPI:
         """Видаляє зображення з Firebase Storage."""
         if not self.is_initialized or not self.bucket: return
         try:
-            # Видаляємо файл з Storage
-            blob = self.bucket.blob(f"gallery_images/{image_id}.jpg")
+            # Видаляємо файл з Storage з user_id шляхом
+            blob = self.bucket.blob(f"{self.user_id}/gallery_images/{image_id}.jpg")
             if blob.exists():
                 blob.delete()
                 logger.info(f"Firebase -> Видалено зображення зі Storage: {image_id}")
@@ -267,7 +276,7 @@ class FirebaseAPI:
         """Відправляє статус готовності до монтажу."""
         if not self.is_initialized: return
         try:
-            status_ref = db.reference('status')
+            status_ref = db.reference(f'users/{self.user_id}/status')
             status_ref.child('montage_ready').set(True)
             logger.info("Firebase -> Відправлено статус готовності до монтажу")
         except Exception as e:
@@ -277,8 +286,118 @@ class FirebaseAPI:
         """Очищає статус готовності до монтажу."""
         if not self.is_initialized: return
         try:
-            status_ref = db.reference('status')
+            status_ref = db.reference(f'users/{self.user_id}/status')
             status_ref.child('montage_ready').set(False)
             logger.info("Firebase -> Очищено статус готовності до монтажу")
         except Exception as e:
             logger.error(f"Firebase -> Помилка очищення статусу готовності: {e}")
+
+    def update_user_id(self, new_user_id):
+        """Оновлює User ID та відповідні посилання."""
+        if not self.is_initialized: return
+        self.user_id = new_user_id if new_user_id else "default"
+        self.base_path = f"users/{self.user_id}"
+        self.logs_ref = db.reference(f'{self.base_path}/logs')
+        self.images_ref = db.reference(f'{self.base_path}/images')
+        self.commands_ref = db.reference(f'{self.base_path}/commands')
+        logger.info(f"Firebase -> User ID оновлено на: {self.user_id}")
+
+    def clear_user_logs(self):
+        """Очищення логів тільки для поточного користувача."""
+        if not self.is_initialized: return
+        try:
+            logger.info(f"Firebase -> Очищення логів для користувача {self.user_id}...")
+            self.logs_ref.delete()
+            logger.info(f"Firebase -> Логи для користувача {self.user_id} успішно очищено.")
+            return True
+        except Exception as e:
+            logger.error(f"Firebase -> Помилка очищення логів для користувача {self.user_id}: {e}")
+            return False
+
+    def clear_user_images(self):
+        """Очищення галереї тільки для поточного користувача."""
+        if not self.is_initialized: return
+        try:
+            # Очищення Database записів
+            logger.info(f"Firebase -> Очищення зображень для користувача {self.user_id}...")
+            self.images_ref.delete()
+            
+            # Очищення Storage файлів
+            if self.bucket:
+                logger.info(f"Firebase -> Очищення файлів Storage для користувача {self.user_id}...")
+                blobs = self.bucket.list_blobs(prefix=f"{self.user_id}/gallery_images/")
+                for blob in blobs:
+                    blob.delete()
+                logger.info(f"Firebase -> Файли Storage для користувача {self.user_id} видалено.")
+            
+            logger.info(f"Firebase -> Зображення для користувача {self.user_id} успішно очищено.")
+            return True
+        except Exception as e:
+            logger.error(f"Firebase -> Помилка очищення зображень для користувача {self.user_id}: {e}")
+            return False
+
+    def get_user_stats(self):
+        """Отримання статистики тільки для поточного користувача."""
+        if not self.is_initialized: return {"logs": 0, "images": 0}
+        try:
+            logs_snapshot = self.logs_ref.get()
+            images_snapshot = self.images_ref.get()
+            
+            logs_count = len(logs_snapshot) if logs_snapshot else 0
+            images_count = len(images_snapshot) if images_snapshot else 0
+            
+            return {
+                "user_id": self.user_id,
+                "logs": logs_count,
+                "images": images_count
+            }
+        except Exception as e:
+            logger.error(f"Firebase -> Помилка отримання статистики для користувача {self.user_id}: {e}")
+            return {"logs": 0, "images": 0}
+
+    def _get_or_generate_user_id(self, config):
+        """Отримує збережений User ID або генерує новий автоматично."""
+        from utils.config_utils import save_config
+        
+        # Перевіряємо чи є збережений User ID
+        saved_user_id = config.get("user_settings", {}).get("user_id", "")
+        if saved_user_id:
+            logger.info(f"Firebase -> Використовується збережений User ID: {saved_user_id}")
+            return saved_user_id
+        
+        # Генеруємо новий User ID
+        try:
+            users_ref = db.reference('users')
+            users_snapshot = users_ref.get()
+            
+            # Знаходимо найбільший існуючий числовий ID
+            max_id = 0
+            if users_snapshot:
+                for user_id in users_snapshot.keys():
+                    try:
+                        numeric_id = int(user_id)
+                        max_id = max(max_id, numeric_id)
+                    except ValueError:
+                        # Ігноруємо не-числові ID
+                        continue
+            
+            # Генеруємо новий ID
+            new_user_id = str(max_id + 1)
+            
+            # Зберігаємо в конфігурації
+            if 'user_settings' not in config:
+                config['user_settings'] = {}
+            config['user_settings']['user_id'] = new_user_id
+            save_config(config)
+            
+            logger.info(f"Firebase -> Згенеровано новий User ID: {new_user_id}")
+            return new_user_id
+            
+        except Exception as e:
+            logger.error(f"Firebase -> Помилка генерації User ID: {e}")
+            # Fallback до "default"
+            return "default"
+
+    def get_current_user_id(self):
+        """Повертає поточний User ID."""
+        return self.user_id

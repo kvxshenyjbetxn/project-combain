@@ -658,19 +658,37 @@ def create_other_settings_tab(parent_tab, app):
     
     app.toggle_default_dir_widgets()
 
-    # --- Нова секція для Firebase ---
+    # --- Нова секція для Firebase та User Settings ---
     firebase_frame = ttk.Labelframe(scrollable_frame, text=app._t('firebase_settings_label'))
     firebase_frame.pack(fill='x', padx=10, pady=5)
     firebase_frame.grid_columnconfigure(1, weight=1)
 
-    ttk.Label(firebase_frame, text=app._t('firebase_db_url_label')).grid(row=0, column=0, sticky='w', padx=5, pady=5)
-    app.firebase_db_url_var = tk.StringVar(value=app.config.get("firebase", {}).get("database_url", ""))
-    firebase_db_url_entry = ttk.Entry(firebase_frame, textvariable=app.firebase_db_url_var)
-    firebase_db_url_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=5)
-    add_text_widget_bindings(app, firebase_db_url_entry)
+    # Відображення поточного User ID (тільки для читання)
+    ttk.Label(firebase_frame, text=app._t('current_user_id_label')).grid(row=0, column=0, sticky='w', padx=5, pady=5)
+    current_user_id = app.config.get("user_settings", {}).get("user_id", "Автогенерується при запуску")
+    app.current_user_id_label = ttk.Label(firebase_frame, text=current_user_id, foreground="cyan")
+    app.current_user_id_label.grid(row=0, column=1, sticky='w', padx=5, pady=5)
     
+    # Статистика користувача
+    app.user_stats_label = ttk.Label(firebase_frame, text="")
+    app.user_stats_label.grid(row=1, column=0, columnspan=3, sticky='w', padx=5, pady=5)
+    
+    # Кнопки управління даними користувача
+    user_actions_frame = ttk.Frame(firebase_frame)
+    user_actions_frame.grid(row=2, column=0, columnspan=3, sticky='ew', padx=5, pady=5)
+    
+    ttk.Button(user_actions_frame, text=app._t('clear_user_logs_button'), 
+              command=app.clear_user_logs, bootstyle="warning-outline").pack(side='left', padx=2)
+    ttk.Button(user_actions_frame, text=app._t('clear_user_images_button'), 
+              command=app.clear_user_images, bootstyle="warning-outline").pack(side='left', padx=2)
+    ttk.Button(user_actions_frame, text=app._t('refresh_stats_button'), 
+              command=app.refresh_user_stats, bootstyle="secondary-outline").pack(side='left', padx=2)
+    
+    # Auto clear gallery checkbox
     app.firebase_auto_clear_gallery_var = tk.BooleanVar(value=app.config.get("firebase", {}).get("auto_clear_gallery", True))
-    ttk.Checkbutton(firebase_frame, variable=app.firebase_auto_clear_gallery_var, text=app._t('auto_clear_gallery_label'), bootstyle="light-round-toggle").grid(row=1, column=0, columnspan=2, sticky='w', padx=5, pady=5)
+    ttk.Checkbutton(firebase_frame, variable=app.firebase_auto_clear_gallery_var, 
+                   text=app._t('auto_clear_gallery_label'), 
+                   bootstyle="light-round-toggle").grid(row=3, column=0, columnspan=3, sticky='w', padx=5, pady=5)
     # --- Кінець нової секції ---
 
     templates_frame = ttk.Labelframe(scrollable_frame, text=app._t('rewrite_templates_label'))
