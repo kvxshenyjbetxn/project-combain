@@ -969,10 +969,13 @@ class TranslationApp:
                 self.root.after(0, self._add_image_to_gallery, image_path, task_key)
                 if self.firebase_api.is_initialized:
                     task_name = data['task'].get('task_name', f"Task {task_key[0]}")
-                    task_index, lang_code = task_key
-                    image_id = f"task{task_index}_{lang_code}_img{i}"
-                    self.image_id_to_path_map[image_id] = image_path # Зберігаємо шлях
-                    self.firebase_api.upload_and_add_image_in_thread(image_path, task_key, i, task_name, prompt)
+                    
+                    # Callback для збереження мапування після завантаження
+                    def save_mapping(image_id, local_path):
+                        self.image_id_to_path_map[image_id] = local_path
+                        logger.info(f"Збережено мапування: {image_id} -> {os.path.basename(local_path)}")
+                    
+                    self.firebase_api.upload_and_add_image_in_thread(image_path, task_key, i, task_name, prompt, callback=save_mapping)
 
                 status_key = f"{task_key[0]}_{task_key[1]}"
                 if status_key in self.task_completion_status:
@@ -2518,18 +2521,26 @@ class TranslationApp:
     def _delete_image(self, image_path):
         """Видаляє зображення з диску та з галереї."""
         try:
+            # Знаходимо ID зображення перед видаленням
+            image_id_to_remove = next((id for id, path in self.image_id_to_path_map.items() if path == image_path), None)
+            
             if os.path.exists(image_path):
                 os.remove(image_path)
-                logger.info(f"Image deleted: {image_path}")
-                if image_path in self.image_widgets:
-                    self.image_widgets[image_path].destroy()
-                    del self.image_widgets[image_path]
+                logger.info(f"Image deleted from disk: {image_path}")
                 
-                # Також видаляємо з Firebase
-                image_id_to_remove = next((id for id, path in self.image_id_to_path_map.items() if path == image_path), None)
-                if image_id_to_remove and self.firebase_api.is_initialized:
-                    self.firebase_api.delete_image_from_db(image_id_to_remove)
-                    self.firebase_api.delete_image_from_storage(image_id_to_remove)
+            if image_path in self.image_widgets:
+                self.image_widgets[image_path].destroy()
+                del self.image_widgets[image_path]
+                logger.info(f"Image widget removed from gallery")
+            
+            # Видаляємо з Firebase
+            if image_id_to_remove and self.firebase_api.is_initialized:
+                self.firebase_api.delete_image_from_db(image_id_to_remove)
+                self.firebase_api.delete_image_from_storage(image_id_to_remove)
+                # Видаляємо з локальної мапи
+                del self.image_id_to_path_map[image_id_to_remove]
+                logger.info(f"Image removed from Firebase: {image_id_to_remove}")
+                
         except Exception as e:
             logger.error(f"Failed to delete image {image_path}: {e}")
             messagebox.showerror("Помилка", f"Не вдалося видалити зображення:\n{e}")

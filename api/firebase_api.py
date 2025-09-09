@@ -178,8 +178,8 @@ class FirebaseAPI:
         except Exception as e:
             logger.error(f"Firebase -> Помилка очищення команд: {e}")
 
-    def upload_and_add_image_in_thread(self, local_path, task_key, image_index, task_name, prompt):
-        if not self.is_initialized: return
+    def upload_and_add_image_in_thread(self, local_path, task_key, image_index, task_name, prompt, callback=None):
+        if not self.is_initialized: return None
         
         def worker():
             task_index, lang_code = task_key
@@ -191,6 +191,37 @@ class FirebaseAPI:
             image_url = self.upload_image_and_get_url(local_path, remote_path)
             if image_url:
                 self.add_image_to_db(image_id, image_url, task_name, lang_code, prompt)
+                # Викликаємо callback з image_id та шляхом
+                if callback:
+                    callback(image_id, local_path)
         
         thread = threading.Thread(target=worker, daemon=True)
         thread.start()
+        
+        # Повертаємо попередньо сгенерований image_id для синхронного використання
+        task_index, lang_code = task_key
+        timestamp = int(time.time() * 1000)
+        return f"task{task_index}_{lang_code}_img{image_index}_{timestamp}"
+    
+    def delete_image_from_db(self, image_id):
+        """Видаляє зображення з Realtime Database."""
+        if not self.is_initialized: return
+        try:
+            self.images_ref.child(image_id).delete()
+            logger.info(f"Firebase -> Видалено зображення з бази даних: {image_id}")
+        except Exception as e:
+            logger.error(f"Firebase -> Помилка видалення зображення з бази даних: {e}")
+    
+    def delete_image_from_storage(self, image_id):
+        """Видаляє зображення з Firebase Storage."""
+        if not self.is_initialized or not self.bucket: return
+        try:
+            # Видаляємо файл з Storage
+            blob = self.bucket.blob(f"gallery_images/{image_id}.jpg")
+            if blob.exists():
+                blob.delete()
+                logger.info(f"Firebase -> Видалено зображення зі Storage: {image_id}")
+            else:
+                logger.warning(f"Firebase -> Зображення не знайдено в Storage: {image_id}")
+        except Exception as e:
+            logger.error(f"Firebase -> Помилка видалення зображення зі Storage: {e}")
