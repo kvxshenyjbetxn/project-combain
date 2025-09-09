@@ -70,7 +70,8 @@ DEFAULT_CONFIG = {
     },
     "firebase": {
         "database_url": "",
-        "storage_bucket": "gs://projectcombain.firebasestorage.app"
+        "storage_bucket": "gs://projectcombain.firebasestorage.app",
+        "auto_clear_gallery": True
     },
     "parallel_processing": {
         "enabled": True,

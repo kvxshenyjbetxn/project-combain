@@ -668,6 +668,9 @@ def create_other_settings_tab(parent_tab, app):
     firebase_db_url_entry = ttk.Entry(firebase_frame, textvariable=app.firebase_db_url_var)
     firebase_db_url_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=5)
     add_text_widget_bindings(app, firebase_db_url_entry)
+    
+    app.firebase_auto_clear_gallery_var = tk.BooleanVar(value=app.config.get("firebase", {}).get("auto_clear_gallery", True))
+    ttk.Checkbutton(firebase_frame, variable=app.firebase_auto_clear_gallery_var, text=app._t('auto_clear_gallery_label'), bootstyle="light-round-toggle").grid(row=1, column=0, columnspan=2, sticky='w', padx=5, pady=5)
     # --- Кінець нової секції ---
 
     templates_frame = ttk.Labelframe(scrollable_frame, text=app._t('rewrite_templates_label'))

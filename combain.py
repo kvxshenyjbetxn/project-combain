@@ -1,7 +1,6 @@
+# Standard library imports
 import tkinter as tk
 from tkinter import ttk as classic_ttk, scrolledtext, messagebox, filedialog, simpledialog
-import ttkbootstrap as ttk
-from ttkbootstrap.constants import *
 import json
 import os
 import requests
@@ -23,14 +22,14 @@ import queue
 import math
 from queue import Queue
 
-# --- Нові імпорти для галереї ---
+# Third-party imports
+import ttkbootstrap as ttk
+from ttkbootstrap.constants import *
 from PIL import Image, ImageTk
-
-# --- Нові залежності, потрібні для монтажу та рерайту ---
 import whisper
 import ffmpeg
 
-#імпорти всіх api
+# API modules
 from api.elevenlabs_api import ElevenLabsAPI
 from api.montage_api import MontageAPI
 from api.openrouter_api import OpenRouterAPI
@@ -41,26 +40,26 @@ from api.voicemaker_api import VoiceMakerAPI
 from api.speechify_api import SpeechifyAPI
 from api.firebase_api import FirebaseAPI
 
-# Імпорти GUI
+# GUI modules
 from gui.task_tab import create_task_tab
 from gui.rewrite_tab import create_rewrite_tab
 from gui.log_tab import create_log_tab
 from gui.settings_tab import create_settings_tab
 from gui.gui_utils import add_text_widget_bindings
 
-#константи
+# Application constants
 from constants.app_settings import (
     APP_BASE_PATH,
     CONFIG_FILE,
     TRANSLATIONS_FILE,
     DETAILED_LOG_FILE,
-    SPEECHIFY_CHAR_LIMIT # <-- НОВИЙ ІМПОРТ
+    SPEECHIFY_CHAR_LIMIT
 )
 
 from constants.default_config import DEFAULT_CONFIG
 from constants.voicemaker_voices import VOICEMAKER_VOICES
 from constants.recraft_substyles import RECRAFT_SUBSTYLES
-from constants.speechify_voices import LANG_VOICE_MAP, SPEECHIFY_EMOTIONS # <-- НОВЕ
+from constants.speechify_voices import LANG_VOICE_MAP, SPEECHIFY_EMOTIONS
 
 from utils import (
     setup_logging,
@@ -71,24 +70,26 @@ from utils import (
     setup_ffmpeg_path,
     chunk_text,
     chunk_text_voicemaker,
-    chunk_text_speechify, # <-- НОВИЙ ІМПОРТ
+    chunk_text_speechify,
     concatenate_audio_files,
     suppress_stdout_stderr
 )
 
-# --- Налаштування логування ---
+# Configure logging
 logger = logging.getLogger("TranslationApp")
 
-# --- Кастомний діалог для вводу ---
+
 class CustomAskStringDialog(tk.Toplevel):
-    def __init__(self, parent, title, prompt, app_instance, initial_value=""): # Додано initial_value
+    """Custom dialog for string input with app-specific styling and bindings."""
+    
+    def __init__(self, parent, title, prompt, app_instance, initial_value=""):
         super().__init__(parent)
         self.transient(parent)
         self.title(title)
         self.app = app_instance 
         self.result = None
         body = ttk.Frame(self)
-        self.initial_focus = self.body(body, prompt, initial_value) # Передаємо initial_value
+        self.initial_focus = self.body(body, prompt, initial_value)
         body.pack(padx=10, pady=10)
         self.buttonbox()
         self.grab_set()
@@ -102,11 +103,11 @@ class CustomAskStringDialog(tk.Toplevel):
         self.initial_focus.focus_set()
         self.wait_window(self)
 
-    def body(self, master, prompt, initial_value=""): # Додано initial_value
+    def body(self, master, prompt, initial_value=""):
         ttk.Label(master, text=prompt).pack(pady=(0, 5))
         self.entry = ttk.Entry(master, width=50)
         self.entry.pack(pady=(0, 10))
-        self.entry.insert(0, initial_value) # Вставляємо текст тут
+        self.entry.insert(0, initial_value)
         add_text_widget_bindings(self.app, self.entry)
         return self.entry
 
@@ -121,18 +122,20 @@ class CustomAskStringDialog(tk.Toplevel):
         box.pack()
 
     def ok(self, event=None):
-        # ВИПРАВЛЕНО: Спочатку отримуємо результат, потім закриваємо
         if self.entry:
             self.result = self.entry.get()
-        self.withdraw() # Ховаємо вікно
+        self.withdraw()
         self.update_idletasks()
         self.destroy()
 
     def cancel(self, event=None):
-        self.result = None # Переконуємось, що результат порожній
+        self.result = None
         self.destroy()
 
+
 class AskTemplateDialog(tk.Toplevel):
+    """Dialog for selecting templates from a predefined list."""
+    
     def __init__(self, parent, title, templates, app_instance):
         super().__init__(parent)
         self.transient(parent)
@@ -185,6 +188,8 @@ class AskTemplateDialog(tk.Toplevel):
         self.destroy()
 
 class AdvancedRegenerateDialog(tk.Toplevel):
+    """Advanced dialog for image regeneration with prompt editing and service selection."""
+    
     def __init__(self, parent, title, app_instance, initial_prompt=""):
         super().__init__(parent)
         self.transient(parent)
@@ -280,10 +285,12 @@ class AdvancedRegenerateDialog(tk.Toplevel):
         self.result = None
         self.destroy()
 
-# --- Основна логіка програми ---
+# Main application logic
 class TranslationApp:
+    """Main application class handling the translation and content generation workflow."""
+    
     def _check_dependencies(self):
-        """Перевіряє наявність всіх необхідних бібліотек перед запуском."""
+        """Check for all required libraries before startup."""
         try:
             from PIL import Image, ImageTk
         except ImportError:
@@ -303,21 +310,21 @@ class TranslationApp:
             messagebox.showerror(self._t('missing_program_title'), self._t('yt-dlp_missing_message'))
             sys.exit(1)
 
-
     def __init__(self, root, config):
+        """Initialize the application with configuration and setup APIs."""
         self.root = root
         self.config = config
         self.translations = load_translations()
         self.lang = self.config.get("ui_settings", {}).get("language", "ua")
         
-        # Спочатку перевіряємо залежності, потім продовжуємо
+        # Check dependencies first
         self._check_dependencies()
 
         self.log_context = threading.local()
         self.translations = load_translations()
         self.lang = self.config.get("ui_settings", {}).get("language", "ua")
         self.log_context = threading.local()
-        self.speechify_lang_voice_map = LANG_VOICE_MAP # <-- ДОДАЙТЕ ЦЕЙ РЯДОК
+        self.speechify_lang_voice_map = LANG_VOICE_MAP
         
         setup_ffmpeg_path(self.config)
 
@@ -326,19 +333,21 @@ class TranslationApp:
             icon_image = tk.PhotoImage(file='icon.png')
             self.root.iconphoto(False, icon_image)
         except tk.TclError as e:
-            logger.warning(f"Не вдалося завантажити іконку програми: {e}")
+            logger.warning(f"Could not load application icon: {e}")
         self.root.geometry("1100x800")
         
+        # Initialize API services
         self.or_api = OpenRouterAPI(self.config)
         self.poll_api = PollinationsAPI(self.config, self)
         self.el_api = ElevenLabsAPI(self.config)
         self.vm_api = VoiceMakerAPI(self.config)
         self.recraft_api = RecraftAPI(self.config)
         self.tg_api = TelegramAPI(self.config)
-        self.firebase_api = FirebaseAPI(self.config) # <-- НОВА ІНІЦІАЛІЗАЦІЯ
+        self.firebase_api = FirebaseAPI(self.config)
         self.speechify_api = SpeechifyAPI(self.config)
         self.montage_api = MontageAPI(self.config, self, self.update_progress_for_montage)
 
+        # Queue management
         self.task_queue = []
         self.is_processing_queue = False
         self.is_shutting_down = False
@@ -352,7 +361,7 @@ class TranslationApp:
         self.pause_event.set()
         self.shutdown_event = threading.Event()
 
-        # Нові змінні для опитування Telegram
+        # Telegram polling variables
         self.telegram_polling_thread = None
         self.stop_telegram_polling = threading.Event()
         self.last_telegram_update_id = 0
@@ -382,10 +391,10 @@ class TranslationApp:
         self.gui_log_handler = None
         self.scrollable_canvases = []
         
-        # Нова структура для відстеження статусу завдань для звіту
+        # Task status tracking for reports
         self.task_completion_status = {}
 
-        # Нові змінні для галереї
+        # Image gallery variables
         self.image_gallery_frame = None
         self.continue_button = None
         self.image_control_active = threading.Event()
@@ -394,7 +403,7 @@ class TranslationApp:
         self.image_id_to_path_map = {}
         self.command_queue = Queue()
         
-        # Словники для відповідності тем
+        # Theme mapping dictionaries
         self.theme_map_to_display = {
             "darkly": self._t('theme_darkly'), 
             "cyborg": self._t('theme_cyborg'), 
@@ -405,11 +414,18 @@ class TranslationApp:
 
         self.setup_gui()
         self.setup_global_bindings() 
-        self.update_startup_balances() 
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.populate_rewrite_template_widgets()
         self.display_saved_balances()
         self.refresh_widget_colors()
+        
+        # Clear old gallery images on startup if auto-clear is enabled
+        if self.firebase_api.is_initialized and self.config.get("firebase", {}).get("auto_clear_gallery", True):
+            self.firebase_api.clear_images()
+            logger.info("Auto-cleared old gallery images from Firebase on application startup")
+            
+        # Відкладаємо оновлення балансів до моменту коли GUI буде готовий
+        self.root.after(1000, self.update_startup_balances)
 
     def display_saved_balances(self):
         vm_balance = self.config.get("voicemaker", {}).get("last_known_balance")
@@ -424,32 +440,27 @@ class TranslationApp:
         return translation.format(**kwargs)
     
     def _escape_markdown(self, text: str) -> str:
-        """Надійно екранує спеціальні символи для Telegram MarkdownV2."""
-        # Оновлений список символів, які потребують екранування
+        """Safely escape special characters for Telegram MarkdownV2."""
         escape_chars = r'\_*[]()~`>#+-=|{}.!'
-        
-        # Створюємо регулярний вираз для пошуку цих символів
-        # і замінюємо кожен знайдений символ на його екрановану версію (з \ попереду)
         return re.sub(f'([{re.escape(escape_chars)}])', r'\\\1', text)
 
     def _on_skip_image_click(self):
-        logger.warning("Користувач натиснув 'Пропустити зображення'.")
+        logger.warning("User clicked 'Skip Image'.")
         self.skip_image_event.set()
         self._update_button_states(is_processing=True, is_image_stuck=False)
 
     def _on_regenerate_alt_click(self):
-        logger.warning("Користувач натиснув 'Спробувати іншим сервісом'.")
+        logger.warning("User clicked 'Try Alternative Service'.")
         self.regenerate_alt_service_event.set()
         self._update_button_states(is_processing=True, is_image_stuck=False)
 
     def _on_image_api_select(self, event=None):
-        """Синхронізує вибір API на всіх вкладках та зберігає налаштування."""
+        """Synchronize API selection across all tabs and save settings."""
         new_api = self.active_image_api_var.get()
         self.config["ui_settings"]["image_generation_api"] = new_api
         self.active_image_api = new_api
         logger.info(f"Default image generation API set to: {new_api}")
-        # Синхронізація не потрібна, оскільки всі вони використовують одну й ту ж змінну
-        save_config(self.config) # Зберігаємо зміну одразу
+        save_config(self.config)
 
     def _on_switch_service_click(self):
         with self.image_api_lock:
@@ -477,13 +488,13 @@ class TranslationApp:
                 self.root.after(0, lambda b=button, s=stuck_state: b.config(state=s))
 
     def enable_skip_button(self):
-        # Ця функція тепер вмикає ТІЛЬКИ кнопку пропуску
+        """Enable only the skip button."""
         for button in self.skip_image_buttons:
             if button:
                 self.root.after(0, lambda b=button: b.config(state="normal"))
 
     def disable_skip_button(self):
-        # Ця функція тепер вимикає ТІЛЬКИ кнопку пропуску
+        """Disable only the skip button."""
         for button in self.skip_image_buttons:
             if button:
                 self.root.after(0, lambda b=button: b.config(state="disabled"))
@@ -551,13 +562,35 @@ class TranslationApp:
 
             self._regenerate_image(path, new_prompt=new_prompt, use_random_seed=not new_prompt)
         else:
-            logger.warning(f"Не вдалося знайти локальний шлях для регенерації зображення ID {image_id}")
+            logger.warning(f"Could not find local path for image regeneration ID {image_id}")
+
+    def clear_gallery_manually(self):
+        """Manually clear all images from Firebase gallery."""
+        if not self.firebase_api.is_initialized:
+            messagebox.showwarning(self._t('warning_title'), "Firebase is not initialized")
+            return
+            
+        result = messagebox.askyesno(
+            "Clear Gallery", 
+            "Are you sure you want to clear all images from the gallery?\n\nThis action cannot be undone."
+        )
+        
+        if result:
+            try:
+                self.firebase_api.clear_images()
+                # Also clear local gallery mapping
+                self.image_id_to_path_map.clear()
+                messagebox.showinfo("Success", "Gallery cleared successfully!")
+                logger.info("Manual gallery clearing completed")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to clear gallery: {e}")
+                logger.error(f"Manual gallery clearing failed: {e}")
 
     def on_closing(self):
-        # 1. Вмикаємо "режим тиші"
+        # Enable "quiet mode"
         self.is_shutting_down = True
         self.shutdown_event.set() 
-        logger.info("Завершення роботи програми та збереження налаштувань інтерфейсу...")
+        logger.info("Application shutdown: saving UI settings...")
 
         if "ui_settings" not in self.config:
             self.config["ui_settings"] = {}
@@ -725,12 +758,9 @@ class TranslationApp:
         create_settings_tab(self.notebook, self)
         create_log_tab(self.notebook, self)
 
-        # --- Створення контейнера для галереї (поки що прихований) ---
+        # Image gallery frame setup (initially hidden)
         self.image_gallery_frame = ttk.Frame(self.root)
-        # self.image_gallery_frame.pack(fill='both', expand=True, padx=10, pady=10) # Ми покажемо його пізніше
-
         self.continue_button = ttk.Button(self.image_gallery_frame, text=self._t('continue_button'), command=self.continue_processing_after_image_control, bootstyle="success")
-        # self.continue_button.pack(pady=10) # Також покажемо пізніше
 
     def add_to_queue(self, silent=False):
         selected_langs = [code for code, var in self.lang_checkbuttons.items() if var.get()]
@@ -888,8 +918,7 @@ class TranslationApp:
 
             image_path = os.path.join(images_folder, f"image_{i+1:03d}.jpg")
 
-            # --- ОСНОВНА ЛОГІКА ОБРОБКИ ПОДІЙ ---
-            # Перевіряємо, чи не було натиснуто одну з кнопок
+            # Check for user interruption events
             if self.skip_image_event.is_set():
                 self.skip_image_event.clear()
                 logger.warning(f"Skipping image {i+1} by user command.")
@@ -921,10 +950,10 @@ class TranslationApp:
                     logger.error(f"Alternate service [{alt_service.capitalize()}] also failed to generate image {i+1}.")
                     all_successful = False
                 
-                i += 1 # Переходимо до наступного зображення незалежно від результату
+                i += 1
                 continue
             
-            # --- СТАНДАРТНА ГЕНЕРАЦІЯ ---
+            # Standard image generation process
             success = False
             if current_api_for_generation == "pollinations":
                 success = self.poll_api.generate_image(prompt, image_path)
@@ -936,7 +965,7 @@ class TranslationApp:
                 logger.info(f"[{current_api_for_generation.capitalize()}] Successfully generated image {i+1}/{len(prompts)}.")
                 self.image_prompts_map[image_path] = prompt
                 
-                # Додаємо зображення в локальну галерею та в Firebase
+                # Add image to local gallery and Firebase
                 self.root.after(0, self._add_image_to_gallery, image_path, task_key)
                 if self.firebase_api.is_initialized:
                     task_name = data['task'].get('task_name', f"Task {task_key[0]}")
@@ -1050,20 +1079,17 @@ class TranslationApp:
 
         main_container = container_info['main_container']
         
-        # --- КЛЮЧОВА ЗМІНА АРХІТЕКТУРИ ---
-        # Ми більше не створюємо фрейм картинки заздалегідь.
-        # Спочатку ми визначаємо, в якому РЯДКУ вона має бути, і лише ПОТІМ створюємо її.
-
+        # Dynamic layout system for gallery images
         try:
-            # 1. Отримуємо актуальні розміри майбутньої картинки (створюючи тимчасовий фрейм)
+            # Calculate actual dimensions for the future image frame
             temp_frame = ttk.Frame(main_container)
             temp_frame.update_idletasks()
-            frame_width = temp_frame.winfo_reqwidth() + 200 # Приблизна ширина (256px) з кнопками
+            frame_width = temp_frame.winfo_reqwidth() + 200
             temp_frame.destroy()
             
             container_width = self.active_gallery_canvas.winfo_width() - 20
 
-            # 2. Перевіряємо, чи потрібен новий рядок
+            # Check if a new row is needed
             if container_info['current_width'] > 0 and (container_info['current_width'] + frame_width) > container_width:
                 new_row = ttk.Frame(main_container)
                 new_row.pack(fill='x', anchor='nw')
@@ -1176,14 +1202,19 @@ class TranslationApp:
         else:
             self.is_processing_queue = True
         
-        # Запускаємо прослуховування команд з Firebase
+        # Setup Firebase command listening and clear old data if enabled
         if self.firebase_api.is_initialized:
             self.stop_command_listener.clear()
-            # Очищуємо попередні команди перед стартом
+            # Clear previous commands and images before starting new session
             self.firebase_api.clear_commands()
+            
+            if self.config.get("firebase", {}).get("auto_clear_gallery", True):
+                self.firebase_api.clear_images()  # Clear old gallery images
+                logger.info("Auto-cleared old gallery images from Firebase for new generation session")
+            
             self.command_listener_thread = threading.Thread(target=self._command_listener_worker, daemon=True)
             self.command_listener_thread.start()
-            # Запускаємо обробник черги
+            # Start queue processor
             self.root.after(100, self._process_command_queue)
 
         self._update_button_states(is_processing=True, is_image_stuck=False)
@@ -1212,10 +1243,10 @@ class TranslationApp:
 
             processing_data = {}
 
-            # --- ЕТАП 0: (ТІЛЬКИ ДЛЯ РЕРАЙТУ) ТРАНСКРИПЦІЯ ---
+            # Phase 0: Transcription (only for rewrite mode)
             if is_rewrite:
                 self.update_progress(self._t('phase_0_transcription'))
-                logger.info("Гібридний режим -> Етап 0: Послідовна транскрипція локальних файлів.")
+                logger.info("Hybrid mode -> Phase 0: Sequential transcription of local files.")
                 
                 transcribed_texts = {}
                 rewrite_base_dir = self.config['output_settings']['rewrite_default_dir']
@@ -1225,11 +1256,8 @@ class TranslationApp:
                     original_filename = task['original_filename']
                     
                     if mp3_path not in transcribed_texts:
-                        # --- ВИПРАВЛЕННЯ ---
-                        # Спочатку отримуємо "чисту" назву, а потім санітизуємо її для створення папки
+                        # Clean filename and sanitize for directory creation
                         video_title = sanitize_filename(os.path.splitext(original_filename)[0])
-                        # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
-                        
                         task_output_dir = os.path.join(rewrite_base_dir, video_title)
                         os.makedirs(task_output_dir, exist_ok=True)
                         original_transcript_path = os.path.join(task_output_dir, "original_transcript.txt")
@@ -1263,9 +1291,9 @@ class TranslationApp:
                                 self.task_completion_status[status_key]['steps'][step_name_key] = "✅"
 
 
-            # --- ЕТАП 1: ПАРАЛЕЛЬНА ОБРОБКА ТЕКСТУ ---
+            # Phase 1: Parallel text processing
             self.update_progress(self._t('phase_1_text_processing'))
-            logger.info(f"Гібридний режим -> Етап 1: Паралельна обробка тексту для {len(queue_to_process)} завдань.")
+            logger.info(f"Hybrid mode -> Phase 1: Parallel text processing for {len(queue_to_process)} tasks.")
             
             with concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
                 text_futures = {}
@@ -1326,7 +1354,7 @@ class TranslationApp:
                 image_master_thread.start()
             else:
                 image_master_thread = None
-                logger.info("Гібридний режим -> Етап генерації зображень вимкнено для всіх завдань. Пропускаємо.")
+                logger.info("Hybrid mode -> Image generation disabled for all tasks. Skipping.")
 
             audio_subs_master_thread = threading.Thread(target=self._audio_subs_pipeline_master, args=(processing_data,))
             audio_subs_master_thread.start()
@@ -1354,9 +1382,9 @@ class TranslationApp:
             else:
                 logger.info("Гібридний режим -> Етап 3: Пауза вимкнена або не потрібна, перехід до монтажу.")
 
-            # --- ЕТАП 4: ФІНАЛЬНИЙ МОНТАЖ ТА ЗВІТИ ПО МОВАХ ---
+            # Phase 4: Final montage and language reports
             self.update_progress(self._t('phase_4_final_montage'))
-            logger.info("Гібридний режим -> Етап 4: Початок фінального монтажу та звітів по мовах.")
+            logger.info("Hybrid mode -> Phase 4: Starting final montage and language reports.")
 
             for task_key, data in sorted(processing_data.items()):
                 lang_code = task_key[1]
@@ -1369,7 +1397,7 @@ class TranslationApp:
                     all_images = sorted([os.path.join(images_folder, f) for f in os.listdir(images_folder) if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
                     
                     if not data.get('audio_chunks') or not data.get('subs_chunks'):
-                        logger.error(f"Аудіо або субтитри відсутні для завдання {task_key}. Пропускаємо монтаж відео.")
+                        logger.error(f"Audio or subtitles missing for task {task_key}. Skipping video montage.")
                         if status_key in self.task_completion_status:
                             step_name = self._t('step_name_create_video')
                             self.task_completion_status[status_key]['steps'][step_name] = "❌"
@@ -1442,9 +1470,9 @@ class TranslationApp:
             self.root.after(0, lambda: messagebox.showinfo(self._t('queue_title'), self._t('info_queue_complete')))
 
         except Exception as e:
-            logger.exception(f"КРИТИЧНА ПОМИЛКА: Непередбачена помилка при обробці гібридної черги: {e}")
+            logger.exception(f"CRITICAL ERROR: Unexpected error in hybrid queue processing: {e}")
         finally:
-            # --- НОВА ЛОГІКА: Очищення тимчасових файлів ---
+            # Cleanup temporary files
             keep_temp_files = self.config.get('parallel_processing', {}).get('keep_temp_files', False)
             if not keep_temp_files:
                 self.update_progress(self._t('phase_cleaning_up'))
@@ -1452,12 +1480,11 @@ class TranslationApp:
                     if 'temp_dir' in data and os.path.exists(data['temp_dir']):
                         try:
                             shutil.rmtree(data['temp_dir'])
-                            logger.info(f"Очищено тимчасову директорію: {data['temp_dir']}")
+                            logger.info(f"Cleaned temporary directory: {data['temp_dir']}")
                         except Exception as e:
-                            logger.error(f"Не вдалося видалити тимчасову директорію {data['temp_dir']}: {e}")
-            # --- КІНЕЦЬ НОВОЇ ЛОГІКИ ---
+                            logger.error(f"Failed to delete temporary directory {data['temp_dir']}: {e}")
 
-            self.stop_telegram_polling.set() # Зупиняємо опитування
+            self.stop_telegram_polling.set()
             self._update_button_states(is_processing=False, is_image_stuck=False)
             if is_rewrite:
                 self.is_processing_rewrite_queue = False
@@ -1471,7 +1498,7 @@ class TranslationApp:
             self.pause_event.set()
 
     def _text_processing_worker(self, task, lang_code):
-        """Виконує всі текстові операції для одного мовного завдання."""
+        """Execute all text operations for a single language task."""
         try:
             lang_name = lang_code.upper()
             lang_config = self.config["languages"][lang_code]
@@ -1494,9 +1521,8 @@ class TranslationApp:
             text_to_process = task['input_text']
             translation_path = os.path.join(output_path, "translation.txt")
 
-            # --- ОСНОВНА ЗМІНА ЛОГІКИ ---
+            # Translation logic
             if lang_steps.get('translate'):
-                # logger.info(f"[TextWorker] Translating for {lang_name}...")
                 translated_text = self.or_api.translate_text(
                     task['input_text'], self.config["openrouter"]["translation_model"],
                     self.config["openrouter"]["translation_params"], lang_name,
@@ -1515,19 +1541,18 @@ class TranslationApp:
                  logger.info(f"Using existing translation file for {lang_name}: {translation_path}")
             else:
                 logger.info(f"Translation step is disabled and no existing translation file was found for {lang_name}. Using original text.")
-                text_to_process = task['input_text'] # Явно вказуємо, що використовуємо оригінал
-            # --- КІНЕЦЬ ЗМІНИ ЛОГІКИ ---
+                text_to_process = task['input_text']
 
             cta_text, raw_prompts = None, None
             prompts_path = os.path.join(output_path, "image_prompts.txt")
             
-            # Генерація CTA (завжди з text_to_process)
+            # Generate CTA (always from text_to_process)
             if lang_steps.get('cta'):
                  cta_text = self.or_api.generate_call_to_action(text_to_process, self.config["openrouter"]["cta_model"], self.config["openrouter"]["cta_params"], lang_name)
                  if cta_text:
                      with open(os.path.join(output_path, "call_to_action.txt"), 'w', encoding='utf-8') as f: f.write(cta_text)
 
-            # Генерація промптів або їх читання
+            # Generate or read prompts
             image_prompts = []
             if lang_steps.get('gen_prompts'):
                 raw_prompts = self.or_api.generate_image_prompts(text_to_process, self.config["openrouter"]["prompt_model"], self.config["openrouter"]["prompt_params"], lang_name)
@@ -2060,8 +2085,7 @@ class TranslationApp:
         text_widget.pack(side="left", fill="both", expand=True)
         return text_widget, container
 
-    # --- МЕТОДИ, ПОВЕРНУТІ ПІСЛЯ РЕФАКТОРИНГУ ---
-
+# Test connection methods
     def test_openrouter_connection(self):
         api_key = self.or_api_key_var.get()
         temp_config = self.config.copy()
@@ -2203,10 +2227,10 @@ class TranslationApp:
         self.config['voicemaker']['api_key'] = self.vm_api_key_var.get()
         self.config['voicemaker']['char_limit'] = self.vm_char_limit_var.get()
 
-        # --- НОВИЙ БЛОК ЗБЕРЕЖЕННЯ SPEECHIFY ---
+        # Speechify configuration
         if 'speechify' not in self.config: self.config['speechify'] = {}
         self.config['speechify']['api_key'] = self.speechify_api_key_var.get()
-        # --- КІНЕЦЬ НОВОГО БЛОКУ ---
+        
         if 'output_settings' not in self.config: self.config['output_settings'] = {}
         self.config['output_settings']['use_default_dir'] = self.output_use_default_var.get()
         self.config['output_settings']['default_dir'] = self.output_default_dir_var.get()
@@ -2220,6 +2244,7 @@ class TranslationApp:
 
         if 'firebase' not in self.config: self.config['firebase'] = {}
         self.config['firebase']['database_url'] = self.firebase_db_url_var.get()
+        self.config['firebase']['auto_clear_gallery'] = self.firebase_auto_clear_gallery_var.get()
 
         # Зберігаємо нове налаштування режиму звіту
         display_value = self.tg_report_timing_var.get()
@@ -2289,9 +2314,14 @@ class TranslationApp:
         balance = self.el_api.update_balance()
         balance_text = balance if balance is not None else 'N/A'
         
-        self.root.after(0, lambda: self.settings_el_balance_label.config(text=f"{self._t('balance_label')}: {balance_text}"))
-        self.root.after(0, lambda: self.chain_el_balance_label.config(text=f"{self._t('elevenlabs_balance_label')}: {balance_text}"))
-        self.root.after(0, lambda: self.rewrite_el_balance_label.config(text=f"{self._t('elevenlabs_balance_label')}: {balance_text}"))
+        # Безпечно оновлюємо GUI тільки якщо головний цикл активний
+        try:
+            self.root.after(0, lambda: self.settings_el_balance_label.config(text=f"{self._t('balance_label')}: {balance_text}"))
+            self.root.after(0, lambda: self.chain_el_balance_label.config(text=f"{self._t('elevenlabs_balance_label')}: {balance_text}"))
+            self.root.after(0, lambda: self.rewrite_el_balance_label.config(text=f"{self._t('elevenlabs_balance_label')}: {balance_text}"))
+        except RuntimeError:
+            # Ігноруємо помилки якщо головний цикл ще не готовий
+            pass
         
         templates_len = "N/A"
         if update_templates:
@@ -2328,12 +2358,23 @@ class TranslationApp:
 
     def update_startup_balances(self):
         def update_thread():
-            self.update_elevenlabs_info(update_templates=True)
-            recraft_balance = self.recraft_api.get_balance()
-            recraft_text = recraft_balance if recraft_balance is not None else 'N/A'
-            self.root.after(0, lambda: self.settings_recraft_balance_label.config(text=f"{self._t('balance_label')}: {recraft_text}"))
-            self.root.after(0, lambda: self.chain_recraft_balance_label.config(text=f"{self._t('recraft_balance_label')}: {recraft_text}"))
-            self.root.after(0, lambda: self.rewrite_recraft_balance_label.config(text=f"{self._t('recraft_balance_label')}: {recraft_text}"))
+            try:
+                # Перевіряємо чи головний потік ще активний
+                if hasattr(self.root, 'after'):
+                    self.update_elevenlabs_info(update_templates=True)
+                    recraft_balance = self.recraft_api.get_balance()
+                    recraft_text = recraft_balance if recraft_balance is not None else 'N/A'
+                    
+                    # Безпечно оновлюємо GUI тільки якщо головний цикл активний
+                    try:
+                        self.root.after(0, lambda: self.settings_recraft_balance_label.config(text=f"{self._t('balance_label')}: {recraft_text}"))
+                        self.root.after(0, lambda: self.chain_recraft_balance_label.config(text=f"{self._t('recraft_balance_label')}: {recraft_text}"))
+                        self.root.after(0, lambda: self.rewrite_recraft_balance_label.config(text=f"{self._t('recraft_balance_label')}: {recraft_text}"))
+                    except RuntimeError:
+                        # Ігноруємо помилки якщо головний цикл ще не готовий
+                        pass
+            except Exception as e:
+                logger.error(f"Error updating startup balances: {e}")
         
         threading.Thread(target=update_thread, daemon=True).start()
 
@@ -2457,8 +2498,7 @@ class TranslationApp:
                     messagebox.showerror(self._t('error_title'), self._t('preview_video_creation_error'))
             
             finally:
-                # --- ВИДАЛЕНО ЛОГІКУ ВИДАЛЕННЯ ---
-                # Тепер відео залишається у папці
+                # Video remains in folder for user access
                 self.root.after(0, lambda: self.preview_button.config(state="normal", text=self._t('preview_button_text')))
 
         threading.Thread(target=preview_thread, daemon=True).start()
@@ -3415,7 +3455,7 @@ class TranslationApp:
         else:
             return sorted(audio_chunks_paths)
 
-# --- НОВИЙ БЛОК: ВСЕ ДЛЯ ВКЛАДКИ РЕРАЙТУ ---
+# Rewrite functionality
     def add_to_rewrite_queue(self):
         video_folder = os.path.join(APP_BASE_PATH, "video")
         if not os.path.isdir(video_folder):
@@ -3623,6 +3663,17 @@ class TranslationApp:
                  logger.info(f"Cleaned up temp directory: {temp_dir}")
 
 if __name__ == "__main__":
+    """Main entry point for the Content Translation and Generation Application.
+    
+    This application provides a comprehensive workflow for:
+    - Text translation using OpenRouter API
+    - Image generation with Pollinations/Recraft APIs
+    - Text-to-speech conversion with multiple providers
+    - Video montage and subtitle creation
+    - Firebase integration for remote control
+    - Telegram notifications and reporting
+    """
+    # Configure Windows console for UTF-8 support
     if sys.platform == 'win32':
         console_window = ctypes.windll.kernel32.GetConsoleWindow()
         if console_window == 0:

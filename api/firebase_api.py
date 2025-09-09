@@ -94,9 +94,13 @@ class FirebaseAPI:
     def add_image_to_db(self, image_id, image_url, task_name, lang_code, prompt):
         if not self.is_initialized: return
         try:
+            # Додаємо кеш-бастер до URL для запобігання кешуванню
+            cache_buster = f"?v={int(time.time() * 1000)}"
+            final_url = image_url + cache_buster
+            
             self.images_ref.child(image_id).set({
                 'id': image_id, 
-                'url': image_url,
+                'url': final_url,
                 'taskName': task_name,
                 'langCode': lang_code,
                 'prompt': prompt,
@@ -179,7 +183,9 @@ class FirebaseAPI:
         
         def worker():
             task_index, lang_code = task_key
-            image_id = f"task{task_index}_{lang_code}_img{image_index}"
+            # Додаємо timestamp для унікальності імені файлу
+            timestamp = int(time.time() * 1000)
+            image_id = f"task{task_index}_{lang_code}_img{image_index}_{timestamp}"
             remote_path = f"gallery_images/{image_id}.jpg"
             
             image_url = self.upload_image_and_get_url(local_path, remote_path)
