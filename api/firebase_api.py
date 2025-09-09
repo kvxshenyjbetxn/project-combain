@@ -117,7 +117,7 @@ class FirebaseAPI:
             cache_buster = f"?v={int(time.time() * 1000)}"
             update_data = {
                 'url': image_url + cache_buster, # Додаємо його до URL
-                'timestamp': int(time.time() * 1000) # Оновлюємо час для сортування
+                # НЕ оновлюємо timestamp щоб зберегти оригінальну позицію
             }
             self.images_ref.child(image_id).update(update_data)
             logger.info(f"Firebase -> Оновлено посилання на зображення в базі даних: {image_id}")
