@@ -535,7 +535,10 @@ class TranslationApp:
                     self._delete_image_by_id(image_id)
                 elif command == "regenerate":
                     new_prompt = command_data.get("newPrompt")
-                    self._regenerate_image_by_id(image_id, new_prompt)
+                    service_override = command_data.get("serviceOverride")
+                    model_override = command_data.get("modelOverride")
+                    style_override = command_data.get("styleOverride")
+                    self._regenerate_image_by_id(image_id, new_prompt, service_override, model_override, style_override)
                 elif command == "continue_montage":
                     logger.info("Firebase -> Отримано команду продовження монтажу з мобільного додатку")
                     self._continue_montage_from_mobile()
@@ -553,7 +556,7 @@ class TranslationApp:
         else:
             logger.warning(f"Не вдалося знайти локальний шлях для зображення ID {image_id}")
     
-    def _regenerate_image_by_id(self, image_id, new_prompt=None):
+    def _regenerate_image_by_id(self, image_id, new_prompt=None, service_override=None, model_override=None, style_override=None):
         if image_id in self.image_id_to_path_map:
             path = self.image_id_to_path_map[image_id]
             logger.info(f"Виконання команди 'regenerate' для {image_id} (шлях: {path})")
@@ -563,7 +566,24 @@ class TranslationApp:
                 self.image_prompts_map[path] = new_prompt
                 logger.info(f"Оновлено промпт для {os.path.basename(path)}: {new_prompt}")
 
-            self._regenerate_image(path, new_prompt=new_prompt, use_random_seed=not new_prompt)
+            # Створюємо словник параметрів для regeneration
+            regen_params = {
+                'new_prompt': new_prompt,
+                'use_random_seed': not new_prompt
+            }
+            
+            # Додаємо параметри сервісу та моделі, якщо вони задані
+            if service_override:
+                regen_params['service_override'] = service_override
+                logger.info(f"Використовується сервіс: {service_override}")
+            if model_override:
+                regen_params['model_override'] = model_override
+                logger.info(f"Використовується модель: {model_override}")
+            if style_override:
+                regen_params['style_override'] = style_override
+                logger.info(f"Використовується стиль: {style_override}")
+
+            self._regenerate_image(path, **regen_params)
         else:
             logger.warning(f"Could not find local path for image regeneration ID {image_id}")
 
