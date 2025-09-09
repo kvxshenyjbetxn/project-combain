@@ -536,6 +536,9 @@ class TranslationApp:
                 elif command == "regenerate":
                     new_prompt = command_data.get("newPrompt")
                     self._regenerate_image_by_id(image_id, new_prompt)
+                elif command == "continue_montage":
+                    logger.info("Firebase -> Отримано команду продовження монтажу з мобільного додатку")
+                    self._continue_montage_from_mobile()
         
         finally:
             # Перезапускаємо таймер для наступної перевірки
@@ -2517,6 +2520,20 @@ class TranslationApp:
             self.continue_button.pack_forget()
             
         self.image_control_active.set() # Знімає блокування з потоку обробки
+
+    def _continue_montage_from_mobile(self):
+        """Обробляє команду продовження монтажу з мобільного додатку."""
+        logger.info("Продовження монтажу з мобільного додатку.")
+        
+        # Ховаємо кнопку "Продовжити", якщо вона є
+        if self.continue_button and self.continue_button.winfo_ismapped():
+            self.continue_button.pack_forget()
+            
+        # Знімаємо блокування з потоку обробки (так само як і в desktop версії)
+        self.image_control_active.set()
+        
+        # Надсилаємо лог про продовження монтажу
+        self.firebase_api.send_log_in_thread("✅ Монтаж продовжено з мобільного додатку")
 
     def _delete_image(self, image_path):
         """Видаляє зображення з диску та з галереї."""

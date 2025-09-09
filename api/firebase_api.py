@@ -178,6 +178,18 @@ class FirebaseAPI:
         except Exception as e:
             logger.error(f"Firebase -> Помилка очищення команд: {e}")
 
+    def send_continue_montage_command(self):
+        """Відправляє команду продовження монтажу."""
+        if not self.is_initialized: return
+        try:
+            self.commands_ref.push().set({
+                'command': 'continue_montage',
+                'timestamp': int(time.time() * 1000)
+            })
+            logger.info("Firebase -> Відправлено команду продовження монтажу")
+        except Exception as e:
+            logger.error(f"Firebase -> Помилка відправки команди продовження монтажу: {e}")
+
     def upload_and_add_image_in_thread(self, local_path, task_key, image_index, task_name, prompt, callback=None):
         if not self.is_initialized: return None
         
