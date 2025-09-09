@@ -262,3 +262,23 @@ class FirebaseAPI:
                 logger.warning(f"Firebase -> Зображення не знайдено в Storage: {image_id}")
         except Exception as e:
             logger.error(f"Firebase -> Помилка видалення зображення зі Storage: {e}")
+
+    def send_montage_ready_status(self):
+        """Відправляє статус готовності до монтажу."""
+        if not self.is_initialized: return
+        try:
+            status_ref = db.reference('status')
+            status_ref.child('montage_ready').set(True)
+            logger.info("Firebase -> Відправлено статус готовності до монтажу")
+        except Exception as e:
+            logger.error(f"Firebase -> Помилка відправки статусу готовності: {e}")
+
+    def clear_montage_ready_status(self):
+        """Очищає статус готовності до монтажу."""
+        if not self.is_initialized: return
+        try:
+            status_ref = db.reference('status')
+            status_ref.child('montage_ready').set(False)
+            logger.info("Firebase -> Очищено статус готовності до монтажу")
+        except Exception as e:
+            logger.error(f"Firebase -> Помилка очищення статусу готовності: {e}")

@@ -424,6 +424,11 @@ class TranslationApp:
             self.firebase_api.clear_images()
             logger.info("Auto-cleared old gallery images from Firebase on application startup")
             
+        # Clear montage ready status on startup
+        if self.firebase_api.is_initialized:
+            self.firebase_api.clear_montage_ready_status()
+            logger.info("Cleared montage ready status on application startup")
+            
         # Відкладаємо оновлення балансів до моменту коли GUI буде готовий
         self.root.after(1000, self.update_startup_balances)
 
@@ -659,6 +664,7 @@ class TranslationApp:
             self.firebase_api.clear_logs()
             self.firebase_api.clear_images()
             self.firebase_api.clear_commands()
+            self.firebase_api.clear_montage_ready_status()  # Очищуємо статус готовності до монтажу
             time.sleep(1) # Невелика затримка, щоб запити напевно пішли
 
         logger.info("Програму закрито.")
