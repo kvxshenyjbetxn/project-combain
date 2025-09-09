@@ -232,12 +232,12 @@ def create_firebase_settings_tab(parent_tab, app):
     _, firebase_scroll_frame = app._create_scrollable_tab(parent_tab)
     
     # Основні налаштування Firebase
-    firebase_frame = ttk.Labelframe(firebase_scroll_frame, text="Firebase Connection")
+    firebase_frame = ttk.Labelframe(firebase_scroll_frame, text=app._t('firebase_connection_label'))
     firebase_frame.pack(fill='x', padx=10, pady=5)
     firebase_frame.grid_columnconfigure(1, weight=1)
     
     # User ID для синхронізації
-    ttk.Label(firebase_frame, text="Your User ID:", font=('TkDefaultFont', 10, 'bold')).grid(row=0, column=0, sticky='w', padx=5, pady=5)
+    ttk.Label(firebase_frame, text=app._t('your_user_id_label'), font=('TkDefaultFont', 10, 'bold')).grid(row=0, column=0, sticky='w', padx=5, pady=5)
     user_id = getattr(app.firebase_api, 'user_id', 'Not available')
     app.firebase_user_id_var = tk.StringVar(value=user_id)
     user_id_entry = ttk.Entry(firebase_frame, textvariable=app.firebase_user_id_var, state='readonly', width=30)
@@ -249,36 +249,36 @@ def create_firebase_settings_tab(parent_tab, app):
         app.root.clipboard_append(user_id)
         print(f"[INFO] User ID '{user_id}' скопійовано в буфер обміну!")
     
-    ttk.Button(firebase_frame, text="Copy", command=copy_user_id, bootstyle="info-outline").grid(row=0, column=2, padx=5, pady=5)
+    ttk.Button(firebase_frame, text=app._t('copy_button'), command=copy_user_id, bootstyle="info-outline").grid(row=0, column=2, padx=5, pady=5)
     
     # Інструкції
     instructions = ttk.Label(firebase_frame, 
-                           text="📱 Щоб підключити мобільний додаток:\n1. Скопіюйте ваш User ID\n2. Введіть його в мобільному додатку\n3. Дані будуть синхронізовані автоматично",
+                           text=app._t('firebase_instructions_text'),
                            font=('TkDefaultFont', 9),
                            foreground='gray')
     instructions.grid(row=1, column=0, columnspan=3, sticky='w', padx=5, pady=(10, 5))
     
     # Статистика
-    stats_frame = ttk.Labelframe(firebase_scroll_frame, text="Statistics")
+    stats_frame = ttk.Labelframe(firebase_scroll_frame, text=app._t('statistics_label'))
     stats_frame.pack(fill='x', padx=10, pady=5)
     stats_frame.grid_columnconfigure(1, weight=1)
     
-    app.firebase_logs_stat_var = tk.StringVar(value="Loading...")
-    app.firebase_images_stat_var = tk.StringVar(value="Loading...")
+    app.firebase_logs_stat_var = tk.StringVar(value=app._t('loading_label_text').replace('\n', ' '))
+    app.firebase_images_stat_var = tk.StringVar(value=app._t('loading_label_text').replace('\n', ' '))
     
-    ttk.Label(stats_frame, text="Logs:").grid(row=0, column=0, sticky='w', padx=5, pady=2)
+    ttk.Label(stats_frame, text=app._t('logs_label')).grid(row=0, column=0, sticky='w', padx=5, pady=2)
     ttk.Label(stats_frame, textvariable=app.firebase_logs_stat_var).grid(row=0, column=1, sticky='w', padx=5, pady=2)
     
-    ttk.Label(stats_frame, text="Images:").grid(row=1, column=0, sticky='w', padx=5, pady=2)
+    ttk.Label(stats_frame, text=app._t('images_label')).grid(row=1, column=0, sticky='w', padx=5, pady=2)
     ttk.Label(stats_frame, textvariable=app.firebase_images_stat_var).grid(row=1, column=1, sticky='w', padx=5, pady=2)
     
     # Кнопки керування
-    control_frame = ttk.Labelframe(firebase_scroll_frame, text="Data Management")
+    control_frame = ttk.Labelframe(firebase_scroll_frame, text=app._t('data_management_label'))
     control_frame.pack(fill='x', padx=10, pady=5)
     
-    ttk.Button(control_frame, text="Clear Logs", command=app.clear_firebase_logs, bootstyle="warning-outline").pack(side=tk.LEFT, padx=5, pady=5)
-    ttk.Button(control_frame, text="Clear Images", command=app.clear_firebase_images, bootstyle="danger-outline").pack(side=tk.LEFT, padx=5, pady=5)
-    ttk.Button(control_frame, text="Refresh Stats", command=app.refresh_firebase_stats, bootstyle="secondary-outline").pack(side=tk.LEFT, padx=5, pady=5)
+    ttk.Button(control_frame, text=app._t('clear_logs_button'), command=app.clear_firebase_logs, bootstyle="warning-outline").pack(side=tk.LEFT, padx=5, pady=5)
+    ttk.Button(control_frame, text=app._t('clear_images_button'), command=app.clear_firebase_images, bootstyle="danger-outline").pack(side=tk.LEFT, padx=5, pady=5)
+    ttk.Button(control_frame, text=app._t('refresh_stats_button_firebase'), command=app.refresh_firebase_stats, bootstyle="secondary-outline").pack(side=tk.LEFT, padx=5, pady=5)
     
     # Оновлюємо статистику при відкритті
     app.refresh_firebase_stats()
