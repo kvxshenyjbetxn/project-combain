@@ -4,6 +4,7 @@ import logging
 import re
 
 from .gui_utils import add_text_widget_bindings
+from constants.log_filters import is_technical_message
 
 # Отримуємо існуючий логер, створений у головному файлі
 logger = logging.getLogger("TranslationApp")
@@ -125,6 +126,11 @@ def create_log_tab(notebook, app):
 
         def handle_main_log(self, record):
             msg = self.format(record)
+            
+            # Перевіряємо чи є це технічне повідомлення
+            if is_technical_message(msg):
+                # Технічні повідомлення записуються тільки в файловий лог, не показуємо в GUI і не відправляємо в Firebase
+                return
 
             # Відправляємо лог у Firebase, ТІЛЬКИ ЯКЩО програма не в процесі закриття
             if hasattr(self.app, 'firebase_api') and self.app.firebase_api.is_initialized and not self.app.is_shutting_down:
@@ -169,4 +175,5 @@ def create_log_tab(notebook, app):
         formatter = logging.Formatter('%(message)s')
         app.gui_log_handler.setFormatter(formatter)
         logger.addHandler(app.gui_log_handler)
-        logger.info(app._t('log_program_started'))
+        # Прибираємо цей лог, оскільки він тепер в списку технічних повідомлень
+        # logger.info(app._t('log_program_started'))
