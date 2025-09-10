@@ -1,7 +1,7 @@
 import tkinter as tk
 import ttkbootstrap as ttk
 
-from .gui_utils import add_text_widget_bindings
+from .gui_utils import add_text_widget_bindings, create_scrollable_tab
 
 # --- Функції-помічники для віджетів на цій вкладці ---
 
@@ -61,7 +61,7 @@ def create_rewrite_tab(notebook, app):
     'notebook' - це головний записник, куди буде додано вкладку.
     'app' - це посилання на головний клас програми для доступу до його функцій та змінних.
     """
-    app.rewrite_canvas, app.rewrite_scrollable_frame = app._create_scrollable_tab(app.rewrite_frame)
+    app.rewrite_canvas, app.rewrite_scrollable_frame = create_scrollable_tab(app, app.rewrite_frame)
     
     # Інформаційна рамка замість поля для вводу
     info_frame = ttk.Labelframe(app.rewrite_scrollable_frame, text=app._t('local_audio_work_label'))

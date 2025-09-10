@@ -45,7 +45,7 @@ from gui.task_tab import create_task_tab
 from gui.rewrite_tab import create_rewrite_tab
 from gui.log_tab import create_log_tab
 from gui.settings_tab import create_settings_tab
-from gui.gui_utils import add_text_widget_bindings
+from gui.gui_utils import add_text_widget_bindings, CustomAskStringDialog, AskTemplateDialog, AdvancedRegenerateDialog, create_scrollable_tab, create_scrolled_text
 
 # Application constants
 from constants.app_settings import (
@@ -75,215 +75,11 @@ from utils import (
     suppress_stdout_stderr
 )
 
+from utils.media_utils import concatenate_videos, video_chunk_worker
+
 # Configure logging
 logger = logging.getLogger("TranslationApp")
 
-
-class CustomAskStringDialog(tk.Toplevel):
-    """Custom dialog for string input with app-specific styling and bindings."""
-    
-    def __init__(self, parent, title, prompt, app_instance, initial_value=""):
-        super().__init__(parent)
-        self.transient(parent)
-        self.title(title)
-        self.app = app_instance 
-        self.result = None
-        body = ttk.Frame(self)
-        self.initial_focus = self.body(body, prompt, initial_value)
-        body.pack(padx=10, pady=10)
-        self.buttonbox()
-        self.grab_set()
-        if not self.initial_focus:
-            self.initial_focus = self
-        self.protocol("WM_DELETE_WINDOW", self.cancel)
-        parent.update_idletasks()
-        x = parent.winfo_x() + (parent.winfo_width() // 2) - (self.winfo_width() // 2)
-        y = parent.winfo_y() + (parent.winfo_height() // 2) - (self.winfo_height() // 2)
-        self.geometry(f"+{x}+{y}")
-        self.initial_focus.focus_set()
-        self.wait_window(self)
-
-    def body(self, master, prompt, initial_value=""):
-        ttk.Label(master, text=prompt).pack(pady=(0, 5))
-        self.entry = ttk.Entry(master, width=50)
-        self.entry.pack(pady=(0, 10))
-        self.entry.insert(0, initial_value)
-        add_text_widget_bindings(self.app, self.entry)
-        return self.entry
-
-    def buttonbox(self):
-        box = ttk.Frame(self)
-        ok_button = ttk.Button(box, text=self.app._t('ok_button'), width=10, command=self.ok, bootstyle="success")
-        ok_button.pack(side=tk.LEFT, padx=5, pady=5)
-        cancel_button = ttk.Button(box, text=self.app._t('cancel_button'), width=10, command=self.cancel, bootstyle="secondary")
-        cancel_button.pack(side=tk.LEFT, padx=5, pady=5)
-        self.bind("<Return>", self.ok)
-        self.bind("<Escape>", self.cancel)
-        box.pack()
-
-    def ok(self, event=None):
-        if self.entry:
-            self.result = self.entry.get()
-        self.withdraw()
-        self.update_idletasks()
-        self.destroy()
-
-    def cancel(self, event=None):
-        self.result = None
-        self.destroy()
-
-
-class AskTemplateDialog(tk.Toplevel):
-    """Dialog for selecting templates from a predefined list."""
-    
-    def __init__(self, parent, title, templates, app_instance):
-        super().__init__(parent)
-        self.transient(parent)
-        self.title(title)
-        self.app = app_instance
-        self.result = None
-        
-        body = ttk.Frame(self)
-        self.initial_focus = self.body(body, templates)
-        body.pack(padx=10, pady=10)
-        
-        self.buttonbox()
-        self.grab_set()
-        
-        if not self.initial_focus:
-            self.initial_focus = self
-        
-        self.protocol("WM_DELETE_WINDOW", self.cancel)
-        parent.update_idletasks()
-        x = parent.winfo_x() + (parent.winfo_width() // 2) - (self.winfo_width() // 2)
-        y = parent.winfo_y() + (parent.winfo_height() // 2) - (self.winfo_height() // 2)
-        self.geometry(f"+{x}+{y}")
-        self.initial_focus.focus_set()
-        self.wait_window(self)
-
-    def body(self, master, templates):
-        ttk.Label(master, text=self.app._t('select_template_prompt')).pack(pady=(0, 5))
-        self.template_var = tk.StringVar()
-        if templates:
-            self.template_var.set(templates[0])
-        self.combobox = ttk.Combobox(master, textvariable=self.template_var, values=templates, state="readonly", width=40)
-        self.combobox.pack(pady=(0, 10))
-        return self.combobox
-
-    def buttonbox(self):
-        box = ttk.Frame(self)
-        ok_button = ttk.Button(box, text="OK", width=10, command=self.ok, bootstyle="success")
-        ok_button.pack(side=tk.LEFT, padx=5, pady=5)
-        cancel_button = ttk.Button(box, text=self.app._t('cancel_button'), width=10, command=self.cancel, bootstyle="secondary")
-        cancel_button.pack(side=tk.LEFT, padx=5, pady=5)
-        self.bind("<Return>", self.ok)
-        self.bind("<Escape>", self.cancel)
-        box.pack()
-
-    def ok(self, event=None):
-        self.result = self.template_var.get()
-        self.destroy()
-
-    def cancel(self, event=None):
-        self.destroy()
-
-class AdvancedRegenerateDialog(tk.Toplevel):
-    """Advanced dialog for image regeneration with prompt editing and service selection."""
-    
-    def __init__(self, parent, title, app_instance, initial_prompt=""):
-        super().__init__(parent)
-        self.transient(parent)
-        self.title(title)
-        self.app = app_instance
-        self.result = None
-
-        body = ttk.Frame(self)
-        self.initial_focus = self.body(body, initial_prompt)
-        body.pack(padx=10, pady=10, fill="both", expand=True)
-
-        self.buttonbox()
-        self.grab_set()
-
-        self.protocol("WM_DELETE_WINDOW", self.cancel)
-        parent.update_idletasks()
-        x = parent.winfo_x() + (parent.winfo_width() // 2) - (self.winfo_width() // 2)
-        y = parent.winfo_y() + (parent.winfo_height() // 2) - (self.winfo_height() // 2)
-        self.geometry(f"600x400+{x}+{y}")
-        self.initial_focus.focus_set()
-        self.wait_window(self)
-
-    def body(self, master, initial_prompt):
-        master.columnconfigure(1, weight=1)
-
-        # Prompt Entry
-        ttk.Label(master, text=self.app._t('prompt_label')).grid(row=0, column=0, sticky='nw', padx=5, pady=5)
-        self.prompt_text, text_container = self.app._create_scrolled_text(master, height=10, width=60)
-        text_container.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
-        master.rowconfigure(0, weight=1)
-        self.prompt_text.insert(tk.END, initial_prompt)
-        add_text_widget_bindings(self.app, self.prompt_text)
-
-        # API Service Selector
-        ttk.Label(master, text=self.app._t('service_label')).grid(row=1, column=0, sticky='w', padx=5, pady=5)
-        self.api_var = tk.StringVar(value=self.app.config.get("ui_settings", {}).get("image_generation_api", "pollinations"))
-        api_combo = ttk.Combobox(master, textvariable=self.api_var, values=["pollinations", "recraft"], state="readonly")
-        api_combo.grid(row=1, column=1, sticky="ew", padx=5, pady=5)
-        api_combo.bind("<<ComboboxSelected>>", self.update_model_options)
-
-        # Model Options Frame
-        self.model_frame = ttk.Frame(master)
-        self.model_frame.grid(row=2, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
-        self.model_frame.columnconfigure(1, weight=1)
-        self.update_model_options()
-
-        return self.prompt_text
-
-    def update_model_options(self, event=None):
-        for widget in self.model_frame.winfo_children():
-            widget.destroy()
-
-        service = self.api_var.get()
-        if service == "pollinations":
-            ttk.Label(self.model_frame, text=self.app._t('model_label')).grid(row=0, column=0, sticky='w', padx=5, pady=2)
-            self.poll_model_var = tk.StringVar(value=self.app.config["pollinations"]["model"])
-            poll_model_dropdown = ttk.Combobox(self.model_frame, textvariable=self.poll_model_var, values=self.app.poll_available_models, state="readonly")
-            poll_model_dropdown.grid(row=0, column=1, sticky='ew', padx=5, pady=2)
-        elif service == "recraft":
-            ttk.Label(self.model_frame, text=self.app._t('recraft_model_label')).grid(row=0, column=0, sticky='w', padx=5, pady=2)
-            self.recraft_model_var = tk.StringVar(value=self.app.config["recraft"]["model"])
-            recraft_model_combo = ttk.Combobox(self.model_frame, textvariable=self.recraft_model_var, values=["recraftv3", "recraftv2"], state="readonly")
-            recraft_model_combo.grid(row=0, column=1, sticky='ew', padx=5, pady=2)
-            
-            ttk.Label(self.model_frame, text=self.app._t('recraft_style_label')).grid(row=1, column=0, sticky='w', padx=5, pady=2)
-            self.recraft_style_var = tk.StringVar(value=self.app.config["recraft"]["style"])
-            recraft_style_combo = ttk.Combobox(self.model_frame, textvariable=self.recraft_style_var, values=["realistic_image", "digital_illustration", "vector_illustration", "icon", "logo_raster"], state="readonly")
-            recraft_style_combo.grid(row=1, column=1, sticky='ew', padx=5, pady=2)
-
-    def buttonbox(self):
-        box = ttk.Frame(self)
-        ok_button = ttk.Button(box, text="OK", width=10, command=self.ok, bootstyle="success")
-        ok_button.pack(side=tk.LEFT, padx=5, pady=5)
-        cancel_button = ttk.Button(box, text=self.app._t('cancel_button'), width=10, command=self.cancel, bootstyle="secondary")
-        cancel_button.pack(side=tk.LEFT, padx=5, pady=5)
-        self.bind("<Return>", self.ok)
-        self.bind("<Escape>", self.cancel)
-        box.pack(pady=5)
-
-    def ok(self, event=None):
-        self.result = {
-            "prompt": self.prompt_text.get("1.0", tk.END).strip(),
-            "service": self.api_var.get()
-        }
-        if self.result["service"] == "pollinations":
-            self.result["model"] = self.poll_model_var.get()
-        elif self.result["service"] == "recraft":
-            self.result["model"] = self.recraft_model_var.get()
-            self.result["style"] = self.recraft_style_var.get()
-        self.destroy()
-
-    def cancel(self, event=None):
-        self.result = None
-        self.destroy()
 
 # Main application logic
 class TranslationApp:
@@ -1458,7 +1254,8 @@ class TranslationApp:
                     with concurrent.futures.ThreadPoolExecutor(max_workers=num_montage_threads) as executor:
                         video_futures = {
                             executor.submit(
-                                self._video_chunk_worker, 
+                                video_chunk_worker, 
+                                self,
                                 list(image_chunks[i]), 
                                 data['audio_chunks'][i], 
                                 data['subs_chunks'][i],
@@ -1477,7 +1274,7 @@ class TranslationApp:
                             base_name = sanitize_filename(data['text_results'].get('task_name', f"Task_{task_key[0]}"))
                         
                         final_video_path = os.path.join(data['text_results']['output_path'], f"video_{base_name}_{lang_code}.mp4")
-                        if self._concatenate_videos(sorted(video_chunk_paths), final_video_path):
+                        if concatenate_videos(self, sorted(video_chunk_paths), final_video_path):
                             logger.info(f"УСПІХ: Створено фінальне відео: {final_video_path}")
                             if status_key in self.task_completion_status:
                                 step_name = self._t('step_name_create_video')
@@ -1643,7 +1440,7 @@ class TranslationApp:
                 tts_service = lang_config.get("tts_service", "elevenlabs")
                 if tts_service == "elevenlabs":
                     task_id = self.el_api.create_audio_task(text_to_process, lang_config.get("elevenlabs_template_uuid"))
-                    if task_id and self.wait_for_elevenlabs_task(task_id, audio_path):
+                    if task_id and self.el_api.wait_for_elevenlabs_task(self, task_id, audio_path):
                         logger.info(f"[AudioWorker] ElevenLabs audio saved for {lang_code}.")
                         return audio_path
                 elif tts_service == "voicemaker":
@@ -1853,7 +1650,7 @@ class TranslationApp:
                     self._update_elevenlabs_balance_labels(new_balance)
                 if task_id and task_id != "INSUFFICIENT_BALANCE":
                     logger.info(f"[Chain] ElevenLabs audio task created: {task_id}. Waiting for result...")
-                    if self.wait_for_elevenlabs_task(task_id, audio_file_path):
+                    if self.el_api.wait_for_elevenlabs_task(self, task_id, audio_file_path):
                         logger.info(f"[Chain] Audio for {lang_name} successfully saved.")
                         self._send_telegram_notification('audio', lang_name, task_num, total_tasks)
                     else:
@@ -2033,44 +1830,6 @@ class TranslationApp:
         
         self.tg_api.send_message_in_thread("\n".join(report_lines))
 
-    def wait_for_elevenlabs_task(self, task_id, output_path):
-        max_wait_time, wait_interval, waited_time = 600, 15, 0
-        
-        while waited_time < max_wait_time:
-            if not self._check_app_state(): return False
-
-            status = self.el_api.check_task_status(task_id)
-            logger.info(f"[Chain] Audio task {task_id} status: {status}")
-
-            if status == 'ending':
-                logger.info(f"Task {task_id} is ready. Attempting to download.")
-                time.sleep(2)
-                return self.el_api.download_audio(task_id, output_path)
-            
-            if status in ['error', 'error_handled']:
-                logger.error(f"Task {task_id} failed with status '{status}'.")
-                return False
-
-            if status in ['waiting', 'processing']:
-                pass
-            
-            elif status == 'ending_processed':
-                 logger.warning(f"Task {task_id} has status 'ending_processed', which means the audio was already downloaded and possibly deleted.")
-                 return False
-
-            elif status is None:
-                logger.error(f"Failed to get status for task {task_id}. Aborting wait.")
-                return False
-
-            # Робимо очікування переривчастим
-            for _ in range(wait_interval):
-                if not self._check_app_state(): return False
-                time.sleep(1)
-            waited_time += wait_interval
-
-        logger.warning(f"[Chain] Timed out waiting for audio task {task_id}.")
-        return False
-        
     def update_progress(self, text, increment_step=False):
         if increment_step:
             self.current_queue_step += 1
@@ -2082,48 +1841,6 @@ class TranslationApp:
     def update_progress_for_montage(self, message):
         self.root.after(0, lambda: self.progress_label.config(text=message))
         logger.info(f"[Montage Progress] {message}")
-        
-    def _create_scrollable_tab(self, parent_tab):
-        theme_name = self.root.style.theme_use()
-        if theme_name == 'cyborg': canvas_bg = "#060606"
-        elif theme_name == 'darkly': canvas_bg = "#222222"
-        else: canvas_bg = "#ffffff"
-
-        canvas = tk.Canvas(parent_tab, highlightthickness=0, bg=canvas_bg)
-        scrollbar = ttk.Scrollbar(parent_tab, orient="vertical", command=canvas.yview)
-        self.dynamic_scrollbars.append(scrollbar)
-
-        scrollable_frame = ttk.Frame(canvas)
-        frame_id = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-
-        def configure_canvas(event):
-            # ВИПРАВЛЕНО: Прибираємо умову і завжди розтягуємо внутрішній фрейм
-            # на всю ширину канвасу. Це робить поведінку стабільною.
-            canvas.itemconfig(frame_id, width=event.width)
-            canvas.configure(scrollregion=canvas.bbox("all"))
-
-        def configure_scrollable_frame(event):
-            # Оновлюємо скролрегіон, коли змінюється розмір контенту
-            canvas.configure(scrollregion=canvas.bbox("all"))
-
-        canvas.bind('<Configure>', configure_canvas)
-        scrollable_frame.bind('<Configure>', configure_scrollable_frame)
-        
-        canvas.configure(yscrollcommand=scrollbar.set)
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-        self.scrollable_canvases.append(canvas)
-        return canvas, scrollable_frame
-
-    def _create_scrolled_text(self, parent, **kwargs):
-        container = ttk.Frame(parent)
-        scrollbar = ttk.Scrollbar(container, orient="vertical")
-        self.dynamic_scrollbars.append(scrollbar)
-        text_widget = tk.Text(container, yscrollcommand=scrollbar.set, **kwargs)
-        scrollbar.config(command=text_widget.yview)
-        scrollbar.pack(side="right", fill="y")
-        text_widget.pack(side="left", fill="both", expand=True)
-        return text_widget, container
 
 # Test connection methods
     def test_openrouter_connection(self):
@@ -3055,7 +2772,7 @@ class TranslationApp:
         self.lang_prompt_frame = ttk.Frame(lang_prompt_container, height=initial_lang_height)
         self.lang_prompt_frame.pack(fill="x")
         self.lang_prompt_frame.pack_propagate(False)
-        self.lang_prompt_text, text_container_widget = self._create_scrolled_text(self.lang_prompt_frame, height=3, width=60, relief="flat", insertbackground="white")
+        self.lang_prompt_text, text_container_widget = create_scrolled_text(self, self.lang_prompt_frame, height=3, width=60, relief="flat", insertbackground="white")
         text_container_widget.pack(fill="both", expand=True)
         add_text_widget_bindings(self, self.lang_prompt_text)
         lang_grip = ttk.Frame(lang_prompt_container, height=8, bootstyle="secondary", cursor="sb_v_double_arrow")
@@ -3080,7 +2797,7 @@ class TranslationApp:
         self.rewrite_prompt_frame = ttk.Frame(rewrite_prompt_container, height=initial_rewrite_height)
         self.rewrite_prompt_frame.pack(fill="x")
         self.rewrite_prompt_frame.pack_propagate(False)
-        self.rewrite_prompt_text, text_container_widget = self._create_scrolled_text(self.rewrite_prompt_frame, height=3, width=60, relief="flat", insertbackground="white")
+        self.rewrite_prompt_text, text_container_widget = create_scrolled_text(self, self.rewrite_prompt_frame, height=3, width=60, relief="flat", insertbackground="white")
         text_container_widget.pack(fill="both", expand=True)
         add_text_widget_bindings(self, self.rewrite_prompt_text)
         rewrite_grip = ttk.Frame(rewrite_prompt_container, height=8, bootstyle="secondary", cursor="sb_v_double_arrow")
@@ -3342,37 +3059,6 @@ class TranslationApp:
         if folder:
             self.output_rewrite_default_dir_var.set(folder)
 
-    def _concatenate_videos(self, video_files, output_path):
-        if not video_files:
-            logger.error("No video files to concatenate.")
-            return False
-        
-        self.update_progress(self._t('phase_final_video'))
-        logger.info(f"Concatenating {len(video_files)} video chunks into {output_path}...")
-
-        concat_list_path = os.path.join(os.path.dirname(output_path), "concat_list.txt")
-        with open(concat_list_path, "w", encoding='utf-8') as f:
-            for file_path in video_files:
-                safe_path = file_path.replace("'", "'\\''")
-                f.write(f"file '{safe_path}'\n")
-
-        try:
-            (
-                ffmpeg
-                .input(concat_list_path, format='concat', safe=0)
-                .output(output_path, c='copy')
-                .overwrite_output()
-                .run(capture_stdout=True, capture_stderr=True)
-            )
-            logger.info("Video concatenation successful.")
-            os.remove(concat_list_path)
-            return True
-        except ffmpeg.Error as e:
-            logger.error(f"Failed to concatenate videos. FFmpeg stderr:\n{e.stderr.decode()}")
-            if os.path.exists(concat_list_path):
-                os.remove(concat_list_path)
-            return False
-
     def _audio_generation_worker(self, text_chunk, output_path, lang_config, lang_code, chunk_index, total_chunks):
         self.log_context.parallel_task = 'Audio Gen'
         self.log_context.worker_id = f'Chunk {chunk_index}/{total_chunks}'
@@ -3386,7 +3072,7 @@ class TranslationApp:
                 if new_balance is not None:
                     self._update_elevenlabs_balance_labels(new_balance)
                 if task_id and task_id != "INSUFFICIENT_BALANCE":
-                    if self.wait_for_elevenlabs_task(task_id, output_path):
+                    if self.el_api.wait_for_elevenlabs_task(self, task_id, output_path):
                         return output_path
             
             elif tts_service == "voicemaker":
@@ -3454,20 +3140,6 @@ class TranslationApp:
         
         logger.info(f"Finished subtitle generation. Successfully created {len(subs_chunk_paths)} subtitle files.")
         return sorted(subs_chunk_paths)
-
-    def _video_chunk_worker(self, images_for_chunk, audio_path, subs_path, output_path, chunk_index, total_chunks):
-        self.log_context.parallel_task = 'Video Montage'
-        self.log_context.worker_id = f'Chunk {chunk_index}/{total_chunks}'
-        try:
-            logger.info(f"ЗАПУСК FFMPEG (відео шматок {chunk_index}/{total_chunks}) для аудіо: {os.path.basename(audio_path)}")
-            if self.montage_api.create_video(images_for_chunk, audio_path, subs_path, output_path):
-                logger.info(f"ЗАВЕРШЕННЯ FFMPEG (відео шматок {chunk_index}/{total_chunks})")
-                return output_path
-            logger.error(f"ПОМИЛКА FFMPEG (відео шматок {chunk_index}/{total_chunks})")
-            return None
-        finally:
-            if hasattr(self.log_context, 'parallel_task'): del self.log_context.parallel_task
-            if hasattr(self.log_context, 'worker_id'): del self.log_context.worker_id
 
     def _prepare_parallel_audio_chunks(self, text_to_process, lang_config, lang_code, temp_dir, num_parallel_chunks):
         tts_service = lang_config.get("tts_service", "elevenlabs")
@@ -3716,14 +3388,14 @@ class TranslationApp:
             image_chunks = np.array_split(all_images, len(final_audio_chunks))
             video_chunk_paths = []
             with concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-                video_futures = {executor.submit(self._video_chunk_worker, list(image_chunks[i]), final_audio_chunks[i], subs_chunk_paths[i], os.path.join(video_chunk_dir, f"video_chunk_{i}.mp4"), i + 1, len(final_audio_chunks)): i for i in range(len(final_audio_chunks))}
+                video_futures = {executor.submit(video_chunk_worker, self, list(image_chunks[i]), final_audio_chunks[i], subs_chunk_paths[i], os.path.join(video_chunk_dir, f"video_chunk_{i}.mp4"), i + 1, len(final_audio_chunks)): i for i in range(len(final_audio_chunks))}
                 for f in concurrent.futures.as_completed(video_futures):
                     result = f.result()
                     if result: video_chunk_paths.append(result)
             
             if len(video_chunk_paths) == len(final_audio_chunks):
                 final_video_path = os.path.join(lang_output_path, f"video_{sanitize_filename(video_title)}_{lang_code}.mp4")
-                if self._concatenate_videos(sorted(video_chunk_paths), final_video_path):
+                if concatenate_videos(self, sorted(video_chunk_paths), final_video_path):
                     logger.info(f"Successfully created final video: {final_video_path}")
                     self._send_telegram_notification('create_video', lang_name, task_num, total_tasks)
             

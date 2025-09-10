@@ -6,7 +6,7 @@ import sys
 from constants.default_config import DEFAULT_CONFIG
 from constants.recraft_substyles import RECRAFT_SUBSTYLES
 
-from .gui_utils import add_text_widget_bindings
+from .gui_utils import add_text_widget_bindings, create_scrollable_tab, create_scrolled_text
 
 # --- Головна функція для створення вкладки ---
 
@@ -56,7 +56,7 @@ def create_api_settings_subtabs(parent_tab, app):
     api_notebook.add(firebase_tab, text="Firebase")
 
     # --- OpenRouter Settings ---
-    _, or_scroll_frame = app._create_scrollable_tab(or_tab)
+    _, or_scroll_frame = create_scrollable_tab(app, or_tab)
     or_frame = ttk.Labelframe(or_scroll_frame, text=app._t('openrouter_settings_label'))
     or_frame.pack(fill='x', padx=10, pady=5)
     or_frame.grid_columnconfigure(1, weight=1)
@@ -88,7 +88,7 @@ def create_api_settings_subtabs(parent_tab, app):
     audio_notebook.add(vm_tab, text=app._t('voicemaker_tab_label'))
     audio_notebook.add(speechify_tab, text=app._t('speechify_tab_label'))
 
-    _, el_scroll_frame = app._create_scrollable_tab(el_tab)
+    _, el_scroll_frame = create_scrollable_tab(app, el_tab)
     el_frame = ttk.Labelframe(el_scroll_frame, text=app._t('elevenlabs_settings_label'))
     el_frame.pack(fill='x', padx=10, pady=5)
     el_frame.grid_columnconfigure(1, weight=1)
@@ -101,7 +101,7 @@ def create_api_settings_subtabs(parent_tab, app):
     app.settings_el_balance_label = ttk.Label(el_frame, text=f"{app._t('balance_label')}: N/A")
     app.settings_el_balance_label.grid(row=1, column=0, columnspan=3, sticky='w', padx=5, pady=5)
 
-    _, vm_scroll_frame = app._create_scrollable_tab(vm_tab)
+    _, vm_scroll_frame = create_scrollable_tab(app, vm_tab)
     vm_frame = ttk.Labelframe(vm_scroll_frame, text=app._t('voicemaker_settings_label'))
     vm_frame.pack(fill='x', padx=10, pady=5)
     vm_frame.grid_columnconfigure(1, weight=1)
@@ -124,7 +124,7 @@ def create_api_settings_subtabs(parent_tab, app):
     add_text_widget_bindings(app, vm_char_limit_spinbox)
 
     # --- Speechify Settings ---
-    _, speechify_scroll_frame = app._create_scrollable_tab(speechify_tab)
+    _, speechify_scroll_frame = create_scrollable_tab(app, speechify_tab)
     speechify_frame = ttk.Labelframe(speechify_scroll_frame, text=app._t('speechify_settings_label'))
     speechify_frame.pack(fill='x', padx=10, pady=5)
     speechify_frame.grid_columnconfigure(1, weight=1)
@@ -144,7 +144,7 @@ def create_api_settings_subtabs(parent_tab, app):
     image_notebook.add(recraft_tab, text=app._t('recraft_tab_label'))
 
     # --- Pollinations Settings ---
-    _, poll_scroll_frame = app._create_scrollable_tab(poll_tab)
+    _, poll_scroll_frame = create_scrollable_tab(app, poll_tab)
     poll_frame = ttk.Labelframe(poll_scroll_frame, text=app._t('pollinations_settings_label'))
     poll_frame.pack(fill='x', padx=10, pady=5)
     poll_frame.grid_columnconfigure(1, weight=1)
@@ -182,7 +182,7 @@ def create_api_settings_subtabs(parent_tab, app):
     ttk.Checkbutton(poll_frame, variable=app.poll_remove_logo_var, text=app._t('remove_logo_label'), bootstyle="light-round-toggle").grid(row=6, column=0, sticky='w', padx=5, pady=5)
 
     # --- Recraft Settings ---
-    _, recraft_scroll_frame = app._create_scrollable_tab(recraft_tab)
+    _, recraft_scroll_frame = create_scrollable_tab(app, recraft_tab)
     recraft_frame = ttk.Labelframe(recraft_scroll_frame, text=app._t('recraft_settings_label'))
     recraft_frame.pack(fill='x', padx=10, pady=5)
     recraft_frame.grid_columnconfigure(1, weight=1)
@@ -229,7 +229,7 @@ def create_api_settings_subtabs(parent_tab, app):
 
 def create_firebase_settings_tab(parent_tab, app):
     """Створює вкладку з налаштуваннями Firebase."""
-    _, firebase_scroll_frame = app._create_scrollable_tab(parent_tab)
+    _, firebase_scroll_frame = create_scrollable_tab(app, parent_tab)
     
     # Основні налаштування Firebase
     firebase_frame = ttk.Labelframe(firebase_scroll_frame, text=app._t('firebase_connection_label'))
@@ -276,6 +276,10 @@ def create_firebase_settings_tab(parent_tab, app):
     control_frame = ttk.Labelframe(firebase_scroll_frame, text=app._t('data_management_label'))
     control_frame.pack(fill='x', padx=10, pady=5)
     
+    # Опція автоочищення галереї
+    app.firebase_auto_clear_gallery_var = tk.BooleanVar(value=app.config.get("firebase", {}).get("auto_clear_gallery", True))
+    ttk.Checkbutton(control_frame, variable=app.firebase_auto_clear_gallery_var, text=app._t('auto_clear_gallery_label'), bootstyle="light-round-toggle").pack(anchor='w', padx=5, pady=5)
+    
     ttk.Button(control_frame, text=app._t('clear_logs_button'), command=app.clear_firebase_logs, bootstyle="warning-outline").pack(side=tk.LEFT, padx=5, pady=5)
     ttk.Button(control_frame, text=app._t('clear_images_button'), command=app.clear_firebase_images, bootstyle="danger-outline").pack(side=tk.LEFT, padx=5, pady=5)
     ttk.Button(control_frame, text=app._t('refresh_stats_button_firebase'), command=app.refresh_firebase_stats, bootstyle="secondary-outline").pack(side=tk.LEFT, padx=5, pady=5)
@@ -284,7 +288,7 @@ def create_firebase_settings_tab(parent_tab, app):
     app.refresh_firebase_stats()
 
 def create_language_settings_tab(parent_tab, app):
-    canvas, scrollable_frame = app._create_scrollable_tab(parent_tab)
+    canvas, scrollable_frame = create_scrollable_tab(app, parent_tab)
     
     lang_frame = ttk.Labelframe(scrollable_frame, text=app._t('language_settings_label'))
     lang_frame.pack(fill='both', expand=True, padx=10, pady=5)
@@ -311,7 +315,7 @@ def create_language_settings_tab(parent_tab, app):
     app.populate_language_list()
 
 def create_prompts_settings_tab(parent_tab, app):
-    canvas, scrollable_frame = app._create_scrollable_tab(parent_tab)
+    canvas, scrollable_frame = create_scrollable_tab(app, parent_tab)
 
     trans_prompt_frame = ttk.Labelframe(scrollable_frame, text=app._t("translation_model_label"))
     trans_prompt_frame.pack(fill='x', padx=10, pady=5)
@@ -371,7 +375,7 @@ def create_prompts_settings_tab(parent_tab, app):
     app.prompt_text_frame.pack(fill="x")
     app.prompt_text_frame.pack_propagate(False)
 
-    app.prompt_gen_prompt_text, text_container_widget = app._create_scrolled_text(app.prompt_text_frame, height=4, width=60, relief="flat", insertbackground="white")
+    app.prompt_gen_prompt_text, text_container_widget = create_scrolled_text(app, app.prompt_text_frame, height=4, width=60, relief="flat", insertbackground="white")
     text_container_widget.pack(fill="both", expand=True)
     add_text_widget_bindings(app, app.prompt_gen_prompt_text)
 
@@ -426,7 +430,7 @@ def create_prompts_settings_tab(parent_tab, app):
     app.cta_text_frame.pack(fill="x")
     app.cta_text_frame.pack_propagate(False)
 
-    app.cta_prompt_text, text_container_widget = app._create_scrolled_text(app.cta_text_frame, height=4, width=60, relief="flat", insertbackground="white")
+    app.cta_prompt_text, text_container_widget = create_scrolled_text(app, app.cta_text_frame, height=4, width=60, relief="flat", insertbackground="white")
     text_container_widget.pack(fill="both", expand=True)
     add_text_widget_bindings(app, app.cta_prompt_text)
 
@@ -468,7 +472,7 @@ def create_prompts_settings_tab(parent_tab, app):
     add_text_widget_bindings(app, cta_tokens_spinbox)
 
 def create_montage_settings_tab(parent_tab, app):
-    _, scrollable_frame = app._create_scrollable_tab(parent_tab)
+    _, scrollable_frame = create_scrollable_tab(app, parent_tab)
 
     parallel_cfg = app.config.get('parallel_processing', DEFAULT_CONFIG['parallel_processing'])
     p_frame = ttk.Labelframe(scrollable_frame, text=app._t('parallel_settings_label'))
@@ -649,7 +653,7 @@ def create_montage_settings_tab(parent_tab, app):
     app.update_codec_settings_ui()
 
 def create_other_settings_tab(parent_tab, app):
-    _, scrollable_frame = app._create_scrollable_tab(parent_tab)
+    _, scrollable_frame = create_scrollable_tab(app, parent_tab)
 
     general_frame = ttk.Labelframe(scrollable_frame, text=app._t('general_settings_label'))
     general_frame.pack(fill='x', padx=10, pady=5)
