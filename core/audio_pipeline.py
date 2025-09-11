@@ -96,6 +96,10 @@ class AudioWorkerPool:
         for worker in self.workers:
             worker.join(timeout=10)
             
+        # Зупиняємо batch executor якщо існує
+        if hasattr(self, 'batch_executor'):
+            self.batch_executor.shutdown(wait=True, timeout=10)
+            
         self.workers.clear()
         logger.info("AudioWorkerPool зупинено")
         
@@ -104,9 +108,165 @@ class AudioWorkerPool:
         if not self.is_running:
             logger.error("AudioWorkerPool не запущено!")
             return
+        
+        tts_service = item.lang_config.get("tts_service", "elevenlabs")
+        
+        # Для VoiceMaker/Speechify групуємо завдання за task_key для batch обробки
+        if tts_service in ['voicemaker', 'speechify']:
+            if not hasattr(self, 'batch_tasks'):
+                self.batch_tasks = {}  # task_key -> список AudioPipelineItem
+                self.batch_processing_status = {}  # task_key -> статус обробки
             
-        self.audio_queue.put(item)
-        logger.debug(f"Додано аудіо завдання: {item.task_key} chunk {item.chunk_index}")
+            if item.task_key not in self.batch_tasks:
+                self.batch_tasks[item.task_key] = []
+                self.batch_processing_status[item.task_key] = 'collecting'
+            
+            self.batch_tasks[item.task_key].append(item)
+            logger.debug(f"Batch: Зібрано {len(self.batch_tasks[item.task_key])}/{item.total_chunks} частин для {item.task_key}")
+            
+            # Перевіряємо чи всі частини для цього завдання зібрані
+            if len(self.batch_tasks[item.task_key]) == item.total_chunks:
+                # Всі частини готові - запускаємо batch обробку
+                logger.info(f"Batch: Запуск обробки {item.total_chunks} частин для {item.task_key} ({tts_service})")
+                self._start_batch_processing(item.task_key, tts_service)
+        else:
+            # Для ElevenLabs додаємо в звичайну чергу (негайна обробка)
+            self.audio_queue.put(item)
+            logger.debug(f"ElevenLabs: Додано аудіо завдання: {item.task_key} chunk {item.chunk_index}")
+        
+    def _start_batch_processing(self, task_key: str, tts_service: str):
+        """Запускає batch обробку для VoiceMaker/Speechify."""
+        if task_key not in self.batch_tasks:
+            return
+            
+        self.batch_processing_status[task_key] = 'processing'
+        items = self.batch_tasks[task_key]
+        
+        # Запускаємо batch обробку в окремому потоці
+        batch_thread = threading.Thread(
+            target=self._process_batch_items,
+            args=(task_key, items, tts_service),
+            name=f"BatchProcessor-{task_key}",
+            daemon=True
+        )
+        batch_thread.start()
+        
+    def _process_batch_items(self, task_key: str, items: List[AudioPipelineItem], tts_service: str):
+        """Обробляє всі частини batch завдання з інтервалом 1 секунда."""
+        try:
+            logger.info(f"Batch: Початок обробки {len(items)} частин для {task_key}")
+            
+            # Відправляємо всі частини на озвучку з інтервалом 1 секунда
+            processing_items = []
+            for i, item in enumerate(items):
+                if self.shutdown_event.is_set():
+                    break
+                    
+                # Встановлюємо контекст для логування
+                if hasattr(self.app, 'log_context'):
+                    self.app.log_context.parallel_task = f'Batch {tts_service.title()}'
+                    self.app.log_context.worker_id = f'Batch-{i+1}/{len(items)}'
+                
+                logger.info(f"Batch: Відправка частини {i+1}/{len(items)} на {tts_service}")
+                
+                # Запускаємо генерацію аудіо (неблокуюча)
+                future = self._start_audio_generation_async(item)
+                processing_items.append((item, future))
+                
+                # Чекаємо 1 секунду перед наступною відправкою (крім останньої)
+                if i < len(items) - 1:
+                    time.sleep(1)
+            
+            # Чекаємо завершення всіх частин
+            logger.info(f"Batch: Очікування завершення {len(processing_items)} частин для {task_key}")
+            completed_items = []
+            
+            for item, future in processing_items:
+                if self.shutdown_event.is_set():
+                    break
+                    
+                try:
+                    # Чекаємо завершення генерації
+                    success = future.result(timeout=300)  # 5 хвилин таймаут
+                    if success:
+                        completed_items.append(item)
+                        logger.info(f"Batch: Завершено частину {item.chunk_index+1} для {task_key}")
+                    else:
+                        logger.error(f"Batch: Помилка генерації частини {item.chunk_index+1} для {task_key}")
+                        
+                except Exception as e:
+                    logger.exception(f"Batch: Виняток при обробці частини {item.chunk_index+1}: {e}")
+            
+            # Всі частини завершені - тепер групуємо для транскрипції
+            if completed_items and len(completed_items) == len(items):
+                logger.info(f"Batch: Всі {len(completed_items)} частин готові, починаємо групування для транскрипції")
+                self._group_batch_for_transcription(task_key, completed_items)
+                self.batch_processing_status[task_key] = 'completed'
+            else:
+                logger.error(f"Batch: Завершено тільки {len(completed_items)}/{len(items)} частин для {task_key}")
+                self.batch_processing_status[task_key] = 'failed'
+                
+        except Exception as e:
+            logger.exception(f"Batch: Критична помилка при обробці {task_key}: {e}")
+            self.batch_processing_status[task_key] = 'failed'
+            
+    def _start_audio_generation_async(self, item: AudioPipelineItem):
+        """Запускає асинхронну генерацію аудіо."""
+        from concurrent.futures import ThreadPoolExecutor
+        
+        # Створюємо окремий executor для batch обробки
+        if not hasattr(self, 'batch_executor'):
+            self.batch_executor = ThreadPoolExecutor(max_workers=10, thread_name_prefix="BatchAudio")
+        
+        return self.batch_executor.submit(self._generate_audio_chunk, item)
+        
+    def _group_batch_for_transcription(self, task_key: str, completed_items: List[AudioPipelineItem]):
+        """Групує готові batch частини для транскрипції."""
+        try:
+            import numpy as np
+            
+            # Сортуємо за chunk_index
+            completed_items.sort(key=lambda x: x.chunk_index)
+            
+            # Розбиваємо на групи за кількістю потоків (max_workers)
+            target_groups = min(self.max_workers, len(completed_items))
+            chunk_groups = np.array_split(completed_items, target_groups)
+            
+            logger.info(f"Batch: Створюємо {len(chunk_groups)} груп для транскрипції {task_key}")
+            
+            for i, group in enumerate(chunk_groups):
+                if len(group) == 0:
+                    continue
+                    
+                if len(group) == 1:
+                    # Одна частина - обробляємо індивідуально
+                    item = group[0]
+                    self.queue_audio_for_transcription(
+                        audio_path=item.output_path,
+                        output_dir=os.path.dirname(item.output_path),
+                        chunk_index=item.chunk_index,
+                        lang_code=item.lang_code,
+                        task_key=item.task_key,
+                        is_merged_group=False
+                    )
+                    logger.info(f"Batch: Додано індивідуальну частину {item.chunk_index} в транскрипцію")
+                else:
+                    # Кілька частин - об'єднуємо в групу
+                    merged_path = self._merge_audio_files_for_transcription(list(group), f"{task_key}_batch_group_{i}")
+                    if merged_path:
+                        self.queue_audio_for_transcription(
+                            audio_path=merged_path,
+                            output_dir=os.path.dirname(group[0].output_path),
+                            chunk_index=group[0].chunk_index,
+                            lang_code=group[0].lang_code,
+                            task_key=task_key,
+                            is_merged_group=True
+                        )
+                        logger.info(f"Batch: Додано об'єднану групу {i+1} ({len(group)} частин) в транскрипцію")
+                        
+        except Exception as e:
+            logger.exception(f"Batch: Помилка групування для транскрипції {task_key}: {e}")
+        
         
     def get_completed_audio_for_task(self, task_key: str) -> Optional[List[str]]:
         """Повертає список готових аудіо файлів для завдання, якщо всі готові."""
@@ -396,88 +556,28 @@ class AudioWorkerPool:
         """Обробляє готові групи аудіо для транскрипції залежно від TTS сервісу."""
         try:
             if tts_service in ['voicemaker', 'speechify']:
-                # Для VoiceMaker та Speechify створюємо об'єднані групи
-                with self.completed_audio_lock:
-                    # Групуємо за завданнями
-                    tasks_groups = {}
-                    for item in list(self.completed_audio_items):
-                        if item.task_key not in tasks_groups:
-                            tasks_groups[item.task_key] = []
-                        tasks_groups[item.task_key].append(item)
+                # VoiceMaker/Speechify тепер використовують batch обробку
+                # Перевіряємо статус batch завдань
+                if hasattr(self, 'batch_processing_status'):
+                    for task_key, status in self.batch_processing_status.items():
+                        if status == 'completed':
+                            logger.debug(f"Batch: Завдання {task_key} вже оброблено через batch систему")
+                return  # Нічого не робимо, batch система все обробила
+                
+            # Для ElevenLabs та інших сервісів обробляємо індивідуальні частини
+            with self.completed_audio_lock:
+                for item in list(self.completed_audio_items):
+                    self.queue_audio_for_transcription(
+                        audio_path=item.audio_path,
+                        output_dir=item.output_dir,
+                        chunk_index=item.chunk_index,
+                        lang_code=item.lang_code,
+                        task_key=item.task_key,
+                        is_merged_group=False
+                    )
                     
-                    # Обробляємо кожне завдання окремо
-                    for task_key, items in tasks_groups.items():
-                        if len(items) < 2:
-                            # Якщо менше 2 частин, обробляємо індивідуально
-                            for item in items:
-                                self.queue_audio_for_transcription(
-                                    audio_path=item.audio_path,
-                                    output_dir=item.output_dir,
-                                    chunk_index=item.chunk_index,
-                                    lang_code=item.lang_code,
-                                    task_key=item.task_key,
-                                    is_merged_group=False
-                                )
-                                self.completed_audio_items.remove(item)
-                            continue
-                        
-                        # Сортуємо за chunk_index
-                        items.sort(key=lambda x: x.chunk_index)
-                        
-                        # Розбиваємо на групи (використовуємо 3 як target групи для 3 потоків)
-                        import numpy as np
-                        target_groups = min(3, len(items))  # Не більше 3 груп
-                        chunk_groups = np.array_split(items, target_groups)
-                        
-                        for i, group in enumerate(chunk_groups):
-                            if len(group) == 0:
-                                continue
-                                
-                            if len(group) == 1:
-                                # Одна частина - обробляємо індивідуально
-                                item = group[0]
-                                self.queue_audio_for_transcription(
-                                    audio_path=item.audio_path,
-                                    output_dir=item.output_dir,
-                                    chunk_index=item.chunk_index,
-                                    lang_code=item.lang_code,
-                                    task_key=item.task_key,
-                                    is_merged_group=False
-                                )
-                            else:
-                                # Кілька частин - об'єднуємо в групу
-                                merged_path = self._merge_audio_files_for_transcription(list(group), f"{task_key}_group_{i}")
-                                if merged_path:
-                                    self.queue_audio_for_transcription(
-                                        audio_path=merged_path,
-                                        output_dir=group[0].output_dir,
-                                        chunk_index=group[0].chunk_index,
-                                        lang_code=group[0].lang_code,
-                                        task_key=task_key,
-                                        is_merged_group=True
-                                    )
-                                    print(f"Додано об'єднану групу {i+1} в транскрипцію: {len(group)} частин -> {merged_path}")
-                        
-                        # Видаляємо оброблені елементи
-                        for item in items:
-                            if item in self.completed_audio_items:
-                                self.completed_audio_items.remove(item)
-                                
-            else:
-                # Для ElevenLabs та інших сервісів обробляємо індивідуальні частини
-                with self.completed_audio_lock:
-                    for item in list(self.completed_audio_items):
-                        self.queue_audio_for_transcription(
-                            audio_path=item.audio_path,
-                            output_dir=item.output_dir,
-                            chunk_index=item.chunk_index,
-                            lang_code=item.lang_code,
-                            task_key=item.task_key,
-                            is_merged_group=False
-                        )
-                        
-                        # Видаляємо оброблений елемент
-                        self.completed_audio_items.remove(item)
+                    # Видаляємо оброблений елемент
+                    self.completed_audio_items.remove(item)
                         
         except Exception as e:
             logger.exception(f"Помилка обробки груп для транскрипції: {e}")
@@ -491,10 +591,10 @@ class AudioWorkerPool:
             # Створюємо назву для об'єднаного файла
             first_item = items[0]
             merged_filename = f"merged_for_transcription_{task_key}_{int(time.time())}.wav"
-            merged_path = os.path.join(first_item.output_dir, merged_filename)
+            merged_path = os.path.join(os.path.dirname(first_item.output_path), merged_filename)
             
             # Створюємо список шляхів аудіо файлів
-            audio_paths = [item.audio_path for item in items if os.path.exists(item.audio_path)]
+            audio_paths = [item.output_path for item in items if os.path.exists(item.output_path)]
             
             # Об'єднуємо файли
             if concatenate_audio_files(audio_paths, merged_path):
