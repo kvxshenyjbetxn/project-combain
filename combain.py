@@ -40,12 +40,15 @@ from api.voicemaker_api import VoiceMakerAPI
 from api.speechify_api import SpeechifyAPI
 from api.firebase_api import FirebaseAPI
 
+# Core modules
+from core.workflow import WorkflowManager
+
 # GUI modules
 from gui.task_tab import create_task_tab
 from gui.rewrite_tab import create_rewrite_tab
 from gui.log_tab import create_log_tab
 from gui.settings_tab import create_settings_tab
-from gui.gui_utils import add_text_widget_bindings
+from gui.gui_utils import add_text_widget_bindings, CustomAskStringDialog, AskTemplateDialog, AdvancedRegenerateDialog, create_scrollable_tab, create_scrolled_text
 
 # Application constants
 from constants.app_settings import (
@@ -72,218 +75,38 @@ from utils import (
     chunk_text_voicemaker,
     chunk_text_speechify,
     concatenate_audio_files,
-    suppress_stdout_stderr
+    suppress_stdout_stderr,
+    clear_user_logs,
+    clear_user_images,
+    refresh_user_stats,
+    refresh_firebase_stats,
+    clear_firebase_logs,
+    clear_firebase_images,
+    update_elevenlabs_balance_labels,
+    test_elevenlabs_connection,
+    update_elevenlabs_info,
+    update_recraft_balance_labels,
+    test_recraft_connection,
+    update_recraft_substyles,
+    send_telegram_error_notification,
+    send_task_completion_report,
+    test_telegram_connection,
+    test_openrouter_connection,
+    populate_openrouter_widgets,
+    add_openrouter_model,
+    remove_openrouter_model,
+    test_pollinations_connection,
+    test_voicemaker_connection,
+    test_speechify_connection
 )
+
+from utils.settings_utils import save_settings as save_settings_util
+
+from utils.media_utils import concatenate_videos, video_chunk_worker
 
 # Configure logging
 logger = logging.getLogger("TranslationApp")
 
-
-class CustomAskStringDialog(tk.Toplevel):
-    """Custom dialog for string input with app-specific styling and bindings."""
-    
-    def __init__(self, parent, title, prompt, app_instance, initial_value=""):
-        super().__init__(parent)
-        self.transient(parent)
-        self.title(title)
-        self.app = app_instance 
-        self.result = None
-        body = ttk.Frame(self)
-        self.initial_focus = self.body(body, prompt, initial_value)
-        body.pack(padx=10, pady=10)
-        self.buttonbox()
-        self.grab_set()
-        if not self.initial_focus:
-            self.initial_focus = self
-        self.protocol("WM_DELETE_WINDOW", self.cancel)
-        parent.update_idletasks()
-        x = parent.winfo_x() + (parent.winfo_width() // 2) - (self.winfo_width() // 2)
-        y = parent.winfo_y() + (parent.winfo_height() // 2) - (self.winfo_height() // 2)
-        self.geometry(f"+{x}+{y}")
-        self.initial_focus.focus_set()
-        self.wait_window(self)
-
-    def body(self, master, prompt, initial_value=""):
-        ttk.Label(master, text=prompt).pack(pady=(0, 5))
-        self.entry = ttk.Entry(master, width=50)
-        self.entry.pack(pady=(0, 10))
-        self.entry.insert(0, initial_value)
-        add_text_widget_bindings(self.app, self.entry)
-        return self.entry
-
-    def buttonbox(self):
-        box = ttk.Frame(self)
-        ok_button = ttk.Button(box, text=self.app._t('ok_button'), width=10, command=self.ok, bootstyle="success")
-        ok_button.pack(side=tk.LEFT, padx=5, pady=5)
-        cancel_button = ttk.Button(box, text=self.app._t('cancel_button'), width=10, command=self.cancel, bootstyle="secondary")
-        cancel_button.pack(side=tk.LEFT, padx=5, pady=5)
-        self.bind("<Return>", self.ok)
-        self.bind("<Escape>", self.cancel)
-        box.pack()
-
-    def ok(self, event=None):
-        if self.entry:
-            self.result = self.entry.get()
-        self.withdraw()
-        self.update_idletasks()
-        self.destroy()
-
-    def cancel(self, event=None):
-        self.result = None
-        self.destroy()
-
-
-class AskTemplateDialog(tk.Toplevel):
-    """Dialog for selecting templates from a predefined list."""
-    
-    def __init__(self, parent, title, templates, app_instance):
-        super().__init__(parent)
-        self.transient(parent)
-        self.title(title)
-        self.app = app_instance
-        self.result = None
-        
-        body = ttk.Frame(self)
-        self.initial_focus = self.body(body, templates)
-        body.pack(padx=10, pady=10)
-        
-        self.buttonbox()
-        self.grab_set()
-        
-        if not self.initial_focus:
-            self.initial_focus = self
-        
-        self.protocol("WM_DELETE_WINDOW", self.cancel)
-        parent.update_idletasks()
-        x = parent.winfo_x() + (parent.winfo_width() // 2) - (self.winfo_width() // 2)
-        y = parent.winfo_y() + (parent.winfo_height() // 2) - (self.winfo_height() // 2)
-        self.geometry(f"+{x}+{y}")
-        self.initial_focus.focus_set()
-        self.wait_window(self)
-
-    def body(self, master, templates):
-        ttk.Label(master, text=self.app._t('select_template_prompt')).pack(pady=(0, 5))
-        self.template_var = tk.StringVar()
-        if templates:
-            self.template_var.set(templates[0])
-        self.combobox = ttk.Combobox(master, textvariable=self.template_var, values=templates, state="readonly", width=40)
-        self.combobox.pack(pady=(0, 10))
-        return self.combobox
-
-    def buttonbox(self):
-        box = ttk.Frame(self)
-        ok_button = ttk.Button(box, text="OK", width=10, command=self.ok, bootstyle="success")
-        ok_button.pack(side=tk.LEFT, padx=5, pady=5)
-        cancel_button = ttk.Button(box, text=self.app._t('cancel_button'), width=10, command=self.cancel, bootstyle="secondary")
-        cancel_button.pack(side=tk.LEFT, padx=5, pady=5)
-        self.bind("<Return>", self.ok)
-        self.bind("<Escape>", self.cancel)
-        box.pack()
-
-    def ok(self, event=None):
-        self.result = self.template_var.get()
-        self.destroy()
-
-    def cancel(self, event=None):
-        self.destroy()
-
-class AdvancedRegenerateDialog(tk.Toplevel):
-    """Advanced dialog for image regeneration with prompt editing and service selection."""
-    
-    def __init__(self, parent, title, app_instance, initial_prompt=""):
-        super().__init__(parent)
-        self.transient(parent)
-        self.title(title)
-        self.app = app_instance
-        self.result = None
-
-        body = ttk.Frame(self)
-        self.initial_focus = self.body(body, initial_prompt)
-        body.pack(padx=10, pady=10, fill="both", expand=True)
-
-        self.buttonbox()
-        self.grab_set()
-
-        self.protocol("WM_DELETE_WINDOW", self.cancel)
-        parent.update_idletasks()
-        x = parent.winfo_x() + (parent.winfo_width() // 2) - (self.winfo_width() // 2)
-        y = parent.winfo_y() + (parent.winfo_height() // 2) - (self.winfo_height() // 2)
-        self.geometry(f"600x400+{x}+{y}")
-        self.initial_focus.focus_set()
-        self.wait_window(self)
-
-    def body(self, master, initial_prompt):
-        master.columnconfigure(1, weight=1)
-
-        # Prompt Entry
-        ttk.Label(master, text=self.app._t('prompt_label')).grid(row=0, column=0, sticky='nw', padx=5, pady=5)
-        self.prompt_text, text_container = self.app._create_scrolled_text(master, height=10, width=60)
-        text_container.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
-        master.rowconfigure(0, weight=1)
-        self.prompt_text.insert(tk.END, initial_prompt)
-        add_text_widget_bindings(self.app, self.prompt_text)
-
-        # API Service Selector
-        ttk.Label(master, text=self.app._t('service_label')).grid(row=1, column=0, sticky='w', padx=5, pady=5)
-        self.api_var = tk.StringVar(value=self.app.config.get("ui_settings", {}).get("image_generation_api", "pollinations"))
-        api_combo = ttk.Combobox(master, textvariable=self.api_var, values=["pollinations", "recraft"], state="readonly")
-        api_combo.grid(row=1, column=1, sticky="ew", padx=5, pady=5)
-        api_combo.bind("<<ComboboxSelected>>", self.update_model_options)
-
-        # Model Options Frame
-        self.model_frame = ttk.Frame(master)
-        self.model_frame.grid(row=2, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
-        self.model_frame.columnconfigure(1, weight=1)
-        self.update_model_options()
-
-        return self.prompt_text
-
-    def update_model_options(self, event=None):
-        for widget in self.model_frame.winfo_children():
-            widget.destroy()
-
-        service = self.api_var.get()
-        if service == "pollinations":
-            ttk.Label(self.model_frame, text=self.app._t('model_label')).grid(row=0, column=0, sticky='w', padx=5, pady=2)
-            self.poll_model_var = tk.StringVar(value=self.app.config["pollinations"]["model"])
-            poll_model_dropdown = ttk.Combobox(self.model_frame, textvariable=self.poll_model_var, values=self.app.poll_available_models, state="readonly")
-            poll_model_dropdown.grid(row=0, column=1, sticky='ew', padx=5, pady=2)
-        elif service == "recraft":
-            ttk.Label(self.model_frame, text=self.app._t('recraft_model_label')).grid(row=0, column=0, sticky='w', padx=5, pady=2)
-            self.recraft_model_var = tk.StringVar(value=self.app.config["recraft"]["model"])
-            recraft_model_combo = ttk.Combobox(self.model_frame, textvariable=self.recraft_model_var, values=["recraftv3", "recraftv2"], state="readonly")
-            recraft_model_combo.grid(row=0, column=1, sticky='ew', padx=5, pady=2)
-            
-            ttk.Label(self.model_frame, text=self.app._t('recraft_style_label')).grid(row=1, column=0, sticky='w', padx=5, pady=2)
-            self.recraft_style_var = tk.StringVar(value=self.app.config["recraft"]["style"])
-            recraft_style_combo = ttk.Combobox(self.model_frame, textvariable=self.recraft_style_var, values=["realistic_image", "digital_illustration", "vector_illustration", "icon", "logo_raster"], state="readonly")
-            recraft_style_combo.grid(row=1, column=1, sticky='ew', padx=5, pady=2)
-
-    def buttonbox(self):
-        box = ttk.Frame(self)
-        ok_button = ttk.Button(box, text="OK", width=10, command=self.ok, bootstyle="success")
-        ok_button.pack(side=tk.LEFT, padx=5, pady=5)
-        cancel_button = ttk.Button(box, text=self.app._t('cancel_button'), width=10, command=self.cancel, bootstyle="secondary")
-        cancel_button.pack(side=tk.LEFT, padx=5, pady=5)
-        self.bind("<Return>", self.ok)
-        self.bind("<Escape>", self.cancel)
-        box.pack(pady=5)
-
-    def ok(self, event=None):
-        self.result = {
-            "prompt": self.prompt_text.get("1.0", tk.END).strip(),
-            "service": self.api_var.get()
-        }
-        if self.result["service"] == "pollinations":
-            self.result["model"] = self.poll_model_var.get()
-        elif self.result["service"] == "recraft":
-            self.result["model"] = self.recraft_model_var.get()
-            self.result["style"] = self.recraft_style_var.get()
-        self.destroy()
-
-    def cancel(self, event=None):
-        self.result = None
-        self.destroy()
 
 # Main application logic
 class TranslationApp:
@@ -346,6 +169,7 @@ class TranslationApp:
         self.firebase_api = FirebaseAPI(self.config)
         self.speechify_api = SpeechifyAPI(self.config)
         self.montage_api = MontageAPI(self.config, self, self.update_progress_for_montage)
+        self.workflow_manager = WorkflowManager(self)
 
         # Queue management
         self.task_queue = []
@@ -675,18 +499,12 @@ class TranslationApp:
         self.root.destroy()
         
     def _update_elevenlabs_balance_labels(self, new_balance):
-        balance_text = new_balance if new_balance is not None else 'N/A'
-        self.root.after(0, lambda: self.settings_el_balance_label.config(text=f"{self._t('balance_label')}: {balance_text}"))
-        self.root.after(0, lambda: self.chain_el_balance_label.config(text=f"{self._t('elevenlabs_balance_label')}: {balance_text}"))
-        self.root.after(0, lambda: self.rewrite_el_balance_label.config(text=f"{self._t('elevenlabs_balance_label')}: {balance_text}"))
-        logger.info(f"Інтерфейс оновлено: баланс ElevenLabs тепер {balance_text}")
+        """Update ElevenLabs balance labels - delegates to utility function."""
+        update_elevenlabs_balance_labels(self, new_balance)
 
     def _update_recraft_balance_labels(self, new_balance):
-        balance_text = new_balance if new_balance is not None else 'N/A'
-        self.root.after(0, lambda: self.settings_recraft_balance_label.config(text=f"{self._t('balance_label')}: {balance_text}"))
-        self.root.after(0, lambda: self.chain_recraft_balance_label.config(text=f"{self._t('recraft_balance_label')}: {balance_text}"))
-        self.root.after(0, lambda: self.rewrite_recraft_balance_label.config(text=f"{self._t('recraft_balance_label')}: {balance_text}"))
-        logger.info(f"Інтерфейс оновлено: баланс Recraft тепер {balance_text}")
+        """Update Recraft balance labels - delegates to utility function."""
+        update_recraft_balance_labels(self, new_balance)
 
     def setup_global_bindings(self):
         mod_key = "Command" if sys.platform == "darwin" else "Control"
@@ -901,7 +719,8 @@ class TranslationApp:
         self.is_processing_queue = True
         self.pause_resume_button.config(state="normal")
         
-        thread = threading.Thread(target=self._process_hybrid_queue, args=(self.task_queue, 'main'))
+        # Запускаємо логіку через новий менеджер
+        thread = threading.Thread(target=self.workflow_manager._process_hybrid_queue, args=(self.task_queue, 'main'))
         thread.daemon = True
         thread.start()
 
@@ -915,149 +734,10 @@ class TranslationApp:
         
         self.is_processing_rewrite_queue = True
         
-        thread = threading.Thread(target=self._process_hybrid_queue, args=(self.rewrite_task_queue, 'rewrite'))
+        # Запускаємо логіку через новий менеджер
+        thread = threading.Thread(target=self.workflow_manager._process_hybrid_queue, args=(self.rewrite_task_queue, 'rewrite'))
         thread.daemon = True
         thread.start()
-
-    def _image_generation_worker(self, data, task_key, task_num, total_tasks):
-        prompts = data['text_results']['prompts']
-        images_folder = data['text_results']['images_folder']
-        lang_name = task_key[1].upper()
-
-        with self.image_api_lock:
-            if self.active_image_api is None:
-                self.active_image_api = self.active_image_api_var.get()
-
-        logger.info(f"Starting generation of {len(prompts)} images for {lang_name} using {self.active_image_api.capitalize()}.")
-
-        auto_switch_enabled = self.config.get("ui_settings", {}).get("auto_switch_service_on_fail", False)
-        retry_limit_for_switch = self.config.get("ui_settings", {}).get("auto_switch_retry_limit", 10)
-        
-        consecutive_failures = 0
-        all_successful = True
-
-        i = 0
-        while i < len(prompts):
-            if not self._check_app_state():
-                all_successful = False
-                break
-
-            prompt = prompts[i]
-            with self.image_api_lock:
-                current_api_for_generation = self.active_image_api
-
-            progress_text = f"Завд.{task_num}/{total_tasks} | {lang_name} - [{current_api_for_generation.capitalize()}] {self._t('step_gen_images')} {i+1}/{len(prompts)}..."
-            self.update_progress(progress_text)
-
-            image_path = os.path.join(images_folder, f"image_{i+1:03d}.jpg")
-
-            # Check for user interruption events
-            if self.skip_image_event.is_set():
-                self.skip_image_event.clear()
-                logger.warning(f"Skipping image {i+1} by user command.")
-                i += 1
-                continue
-
-            if self.regenerate_alt_service_event.is_set():
-                self.regenerate_alt_service_event.clear()
-                logger.warning(f"Attempting to regenerate image {i+1} with alternate service.")
-                with self.image_api_lock:
-                    alt_service = "recraft" if self.active_image_api == "pollinations" else "pollinations"
-                
-                success_alt = False
-                if alt_service == "pollinations":
-                    success_alt = self.poll_api.generate_image(prompt, image_path)
-                elif alt_service == "recraft":
-                    success_alt, _ = self.recraft_api.generate_image(prompt, image_path)
-
-                if success_alt:
-                    logger.info(f"[{alt_service.capitalize()}] Successfully regenerated image {i+1} with alternate service.")
-                    # Логіка успішної генерації, як у звичайному випадку
-                    consecutive_failures = 0
-                    self.image_prompts_map[image_path] = prompt
-                    self.root.after(0, self._add_image_to_gallery, image_path, task_key)
-                    status_key = f"{task_key[0]}_{task_key[1]}"
-                    if status_key in self.task_completion_status:
-                        self.task_completion_status[status_key]["images_generated"] += 1
-                else:
-                    logger.error(f"Alternate service [{alt_service.capitalize()}] also failed to generate image {i+1}.")
-                    all_successful = False
-                
-                i += 1
-                continue
-            
-            # Standard image generation process
-            success = False
-            if current_api_for_generation == "pollinations":
-                success = self.poll_api.generate_image(prompt, image_path)
-            elif current_api_for_generation == "recraft":
-                success, _ = self.recraft_api.generate_image(prompt, image_path)
-
-            if success:
-                consecutive_failures = 0 
-                logger.info(f"[{current_api_for_generation.capitalize()}] Successfully generated image {i+1}/{len(prompts)}.")
-                self.image_prompts_map[image_path] = prompt
-                
-                # Add image to local gallery and Firebase
-                self.root.after(0, self._add_image_to_gallery, image_path, task_key)
-                if self.firebase_api.is_initialized:
-                    task_name = data['task'].get('task_name', f"Task {task_key[0]}")
-                    
-                    # Callback для збереження мапування після завантаження
-                    def save_mapping(image_id, local_path):
-                        self.image_id_to_path_map[image_id] = local_path
-                        logger.info(f"Збережено мапування: {image_id} -> {os.path.basename(local_path)}")
-                    
-                    self.firebase_api.upload_and_add_image_in_thread(image_path, task_key, i, task_name, prompt, callback=save_mapping)
-
-                status_key = f"{task_key[0]}_{task_key[1]}"
-                if status_key in self.task_completion_status:
-                    self.task_completion_status[status_key]["images_generated"] += 1
-                i += 1 
-            else:
-                consecutive_failures += 1
-                logger.error(f"[{current_api_for_generation.capitalize()}] Failed to generate image {i+1}. Consecutive failures: {consecutive_failures}.")
-                
-                # Логіка автоматичного перемикання
-                if auto_switch_enabled and consecutive_failures >= retry_limit_for_switch:
-                    logger.warning(f"Reached {consecutive_failures} consecutive failures. Triggering automatic service switch.")
-                    with self.image_api_lock:
-                        new_service = "recraft" if self.active_image_api == "pollinations" else "pollinations"
-                        self.active_image_api = new_service
-                        self.active_image_api_var.set(new_service) # Оновлюємо змінну для GUI
-                        logger.warning(f"Service automatically switched to: {self.active_image_api.capitalize()}")
-                    consecutive_failures = 0
-                    continue 
-
-                # Логіка ручного втручання
-                # Використовуємо ліміт з Pollinations як тригер для кнопок
-                manual_intervention_limit = self.config.get("pollinations", {}).get("retries", 5)
-                if consecutive_failures >= manual_intervention_limit:
-                    logger.error(f"{manual_intervention_limit} consecutive failures for one image. Activating manual controls.")
-                    self._update_button_states(is_processing=True, is_image_stuck=True)
-                    self.tg_api.send_message_with_buttons(
-                        message="❌ *Помилка генерації зображення*\n\nНе вдається згенерувати зображення\\. Процес очікує\\. Оберіть дію:",
-                        buttons=[
-                            {"text": "Пропустити", "callback_data": "skip_image_action"},
-                            {"text": "Спробувати іншим", "callback_data": "regenerate_alt_action"},
-                            {"text": "Перемкнути назавжди", "callback_data": "switch_service_action"}
-                        ]
-                    )
-                    # Чекаємо на дію користувача
-                    while not (self.skip_image_event.is_set() or self.regenerate_alt_service_event.is_set()):
-                        if not self._check_app_state(): # Дозволяє паузу/продовження під час очікування
-                            all_successful = False
-                            break
-                        time.sleep(0.5)
-                    
-                    self._update_button_states(is_processing=True, is_image_stuck=False) # Деактивуємо кнопки після дії
-                    continue # Повертаємось на початок циклу, щоб обробити подію
-                
-                # Якщо нічого не спрацювало, просто переходимо до наступного зображення
-                all_successful = False
-                i += 1
-
-        return all_successful
 
     def setup_empty_gallery(self, queue_type, tasks_to_display):
         if queue_type == 'main': 
@@ -1167,533 +847,6 @@ class TranslationApp:
 
         except Exception as e:
             logger.error(f"Could not load image {image_path}: {e}")
-
-    def _rewrite_text_processing_worker(self, task, lang_code):
-        """Обробляє ВЖЕ транскрибований текст для одного завдання рерайту."""
-        try:
-            video_title = task['video_title']
-            transcribed_text = task['transcribed_text']
-            rewrite_base_dir = self.config['output_settings']['rewrite_default_dir']
-
-            if not transcribed_text.strip(): return None
-
-            # Подальша обробка для конкретної мови
-            lang_output_path = os.path.join(rewrite_base_dir, video_title, lang_code.upper())
-            os.makedirs(lang_output_path, exist_ok=True)
-
-            selected_template_name = self.rewrite_template_var.get()
-            rewrite_prompt_template = self.config.get("rewrite_prompt_templates", {}).get(selected_template_name, {}).get(lang_code)
-            
-            rewritten_text = self.or_api.rewrite_text(transcribed_text, self.config["openrouter"]["rewrite_model"], self.config["openrouter"]["rewrite_params"], rewrite_prompt_template)
-            if not rewritten_text: return None
-            
-            with open(os.path.join(lang_output_path, "rewritten_text.txt"), "w", encoding='utf-8') as f: f.write(rewritten_text)
-            
-            # CTA та промти
-            cta_path = os.path.join(lang_output_path, "call_to_action.txt")
-            prompts_path = os.path.join(lang_output_path, "image_prompts.txt")
-
-            # Генерація CTA або читання з файлу
-            if task['steps'][lang_code]['cta']:
-                cta_text = self.or_api.generate_call_to_action(rewritten_text, self.config["openrouter"]["cta_model"], self.config["openrouter"]["cta_params"])
-                if cta_text:
-                    with open(cta_path, 'w', encoding='utf-8') as f: f.write(cta_text)
-
-            # Генерація промтів або читання з файлу
-            raw_prompts = None
-            if task['steps'][lang_code]['gen_prompts']:
-                raw_prompts = self.or_api.generate_image_prompts(rewritten_text, self.config["openrouter"]["prompt_model"], self.config["openrouter"]["prompt_params"])
-                if raw_prompts:
-                    with open(prompts_path, 'w', encoding='utf-8') as f: f.write(raw_prompts)
-            elif os.path.exists(prompts_path):
-                logger.info(f"Using existing prompts file for rewrite task: {prompts_path}")
-                with open(prompts_path, 'r', encoding='utf-8') as f:
-                    raw_prompts = f.read()
-
-            image_prompts = []
-            if raw_prompts:
-                # Універсальна логіка: об'єднуємо багаторядкові промпти, а потім розділяємо за нумерацією
-                # Спочатку замінюємо всі переноси рядків на пробіли
-                single_line_text = raw_prompts.replace('\n', ' ').strip()
-                # Розділяємо за шаблоном "число." (наприклад, "1.", "2." і т.д.), видаляючи сам роздільник
-                prompt_blocks = re.split(r'\s*\d+[\.\)]\s*', single_line_text)
-                # Перший елемент після розділення зазвичай порожній, тому відфільтровуємо його
-                image_prompts = [block.strip() for block in prompt_blocks if block.strip()]
-
-            images_folder = os.path.join(lang_output_path, "images")
-            os.makedirs(images_folder, exist_ok=True)
-            
-            return {
-                "text_to_process": rewritten_text, "output_path": lang_output_path,
-                "prompts": image_prompts, "images_folder": images_folder, "video_title": video_title
-            }
-        except Exception as e:
-            logger.exception(f"Error in rewrite text processing worker for {lang_code}: {e}")
-            return None
-
-    def _process_hybrid_queue(self, queue_to_process_list, queue_type):
-        is_rewrite = queue_type == 'rewrite'
-        if is_rewrite:
-            self.is_processing_rewrite_queue = True
-        else:
-            self.is_processing_queue = True
-        
-        # Setup Firebase command listening and clear old data if enabled
-        if self.firebase_api.is_initialized:
-            self.stop_command_listener.clear()
-            # Clear previous commands and images before starting new session
-            self.firebase_api.clear_commands()
-            self.firebase_api.clear_montage_ready_status()  # Clear montage ready status
-            
-            if self.config.get("firebase", {}).get("auto_clear_gallery", True):
-                self.firebase_api.clear_images()  # Clear old gallery images
-                logger.info("Auto-cleared old gallery images from Firebase for new generation session")
-            
-            self.command_listener_thread = threading.Thread(target=self._command_listener_worker, daemon=True)
-            self.command_listener_thread.start()
-            # Start queue processor
-            self.root.after(100, self._process_command_queue)
-
-        self._update_button_states(is_processing=True, is_image_stuck=False)
-
-        try:
-            queue_to_process = list(queue_to_process_list)
-            if is_rewrite:
-                self.rewrite_task_queue.clear()
-                self.update_rewrite_queue_display()
-            else:
-                self.task_queue.clear()
-                self.update_queue_display()
-            
-            # Ініціалізація статусу для всіх завдань у черзі
-            self.task_completion_status = {}
-            for i, task in enumerate(queue_to_process):
-                task['task_index'] = i
-                for lang_code in task['selected_langs']:
-                    task_key = f"{i}_{lang_code}"
-                    self.task_completion_status[task_key] = {
-                        "task_name": task.get('task_name'),
-                        "steps": {self._t('step_name_' + step_name): "⚪️" for step_name, enabled in task['steps'][lang_code].items() if enabled},
-                        "images_generated": 0, # Лічильник успішних зображень
-                        "total_images": 0      # Загальна кількість зображень для генерації
-                    }
-
-            processing_data = {}
-
-            # Phase 0: Transcription (only for rewrite mode)
-            if is_rewrite:
-                self.update_progress(self._t('phase_0_transcription'))
-                logger.info("Hybrid mode -> Phase 0: Sequential transcription of local files.")
-                
-                transcribed_texts = {}
-                rewrite_base_dir = self.config['output_settings']['rewrite_default_dir']
-                
-                for task in queue_to_process:
-                    mp3_path = task['mp3_path']
-                    original_filename = task['original_filename']
-                    
-                    if mp3_path not in transcribed_texts:
-                        # Clean filename and sanitize for directory creation
-                        video_title = sanitize_filename(os.path.splitext(original_filename)[0])
-                        task_output_dir = os.path.join(rewrite_base_dir, video_title)
-                        os.makedirs(task_output_dir, exist_ok=True)
-                        original_transcript_path = os.path.join(task_output_dir, "original_transcript.txt")
-                        
-                        if os.path.exists(original_transcript_path):
-                            with open(original_transcript_path, "r", encoding='utf-8') as f:
-                                transcribed_text = f.read()
-                        else:
-                            model = self.montage_api._load_whisper_model()
-                            if not model:
-                                logger.error("Не вдалося завантажити модель Whisper. Переривання.")
-                                return
-                            transcription_result = model.transcribe(mp3_path, verbose=False)
-                            transcribed_text = transcription_result['text']
-                            with open(original_transcript_path, "w", encoding='utf-8') as f:
-                                f.write(transcribed_text)
-
-                        transcribed_texts[mp3_path] = {"text": transcribed_text, "title": video_title}
-
-                for task in queue_to_process:
-                    if task['mp3_path'] in transcribed_texts:
-                        task['transcribed_text'] = transcribed_texts[task['mp3_path']]['text']
-                        task['video_title'] = transcribed_texts[task['mp3_path']]['title']
-                        
-                        # Оновлюємо статус транскрипції для всіх мов у цьому завданні
-                        task_idx_str = task['task_index']
-                        step_name_key = self._t('step_name_transcribe')
-                        for lang_code in task['selected_langs']:
-                            status_key = f"{task_idx_str}_{lang_code}"
-                            if status_key in self.task_completion_status and step_name_key in self.task_completion_status[status_key]['steps']:
-                                self.task_completion_status[status_key]['steps'][step_name_key] = "✅"
-
-
-            # Phase 1: Parallel text processing
-            self.update_progress(self._t('phase_1_text_processing'))
-            logger.info(f"Hybrid mode -> Phase 1: Parallel text processing for {len(queue_to_process)} tasks.")
-            
-            with concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-                text_futures = {}
-                worker = self._rewrite_text_processing_worker if is_rewrite else self._text_processing_worker
-
-                for task_index, task in enumerate(queue_to_process):
-                    if is_rewrite and 'transcribed_text' not in task:
-                        continue
-                    
-                    for lang_code in task['selected_langs']:
-                        task_key = (task_index, lang_code)
-                        processing_data[task_key] = {'task': task} 
-                        future = executor.submit(worker, task, lang_code)
-                        text_futures[future] = task_key
-                
-                for future in concurrent.futures.as_completed(text_futures):
-                    task_key = text_futures[future]
-                    processing_data[task_key]['text_results'] = future.result()
-
-            logger.info("Гібридний режим -> Етап 1: Обробку тексту завершено.")
-            
-            # --- ОНОВЛЕНИЙ БЛОК ПІСЛЯ ОБРОБКИ ТЕКСТУ ---
-            for task_key, data in processing_data.items():
-                task_idx_str, lang_code = task_key
-                status_key = f"{task_idx_str}_{lang_code}"
-
-                if status_key in self.task_completion_status:
-                    if data.get('text_results'):
-                        # Відмічаємо успішність текстових етапів
-                        steps_to_mark = ['translate', 'rewrite', 'cta', 'gen_prompts']
-                        for step in steps_to_mark:
-                            step_name_key = self._t('step_name_' + step)
-                            if step_name_key in self.task_completion_status[status_key]['steps']:
-                                self.task_completion_status[status_key]['steps'][step_name_key] = "✅"
-                        
-                        # Зберігаємо загальну кількість запланованих зображень
-                        num_prompts = len(data['text_results'].get("prompts", []))
-                        self.task_completion_status[status_key]["total_images"] = num_prompts
-                    else:
-                        # Якщо текстовий етап провалився, відмічаємо всі наступні як провалені
-                        for step_name in self.task_completion_status[status_key]['steps']:
-                            self.task_completion_status[status_key]['steps'][step_name] = "❌"
-
-
-            # --- ЕТАП 2: ОДНОЧАСНА ГЕНЕРАЦІЯ МЕДІА ---
-            self.update_progress(self._t('phase_2_media_generation'))
-            logger.info("Гібридний режим -> Етап 2: Одночасна генерація медіа.")
-            
-            self.root.after(0, self.setup_empty_gallery, queue_type, queue_to_process)
-            
-            should_gen_images = any(
-                data.get('text_results') and data['task']['steps'][key[1]].get('gen_images')
-                for key, data in processing_data.items()
-            )
-
-            if should_gen_images:
-                image_master_thread = threading.Thread(target=self._sequential_image_master, args=(processing_data, queue_to_process))
-                image_master_thread.start()
-            else:
-                image_master_thread = None
-                logger.info("Hybrid mode -> Image generation disabled for all tasks. Skipping.")
-
-            audio_subs_master_thread = threading.Thread(target=self._audio_subs_pipeline_master, args=(processing_data,))
-            audio_subs_master_thread.start()
-            
-            if image_master_thread:
-                image_master_thread.join()
-            audio_subs_master_thread.join()
-            
-            logger.info("Гібридний режим -> Етап 2: Генерацію всіх медіафайлів завершено.")
-            
-            # --- ЕТАП 3: ОПЦІОНАЛЬНА ПАУЗА ---
-            if self.config.get("ui_settings", {}).get("image_control_enabled", False) and should_gen_images:
-                self.update_progress(self._t('phase_3_image_control'))
-                logger.info("Гібридний режим -> Етап 3: Пауза для налаштування зображень користувачем.")
-                
-                # Відправляємо статус готовності до монтажу в Firebase
-                self.firebase_api.send_montage_ready_status()
-                
-                # Надсилаємо повідомлення в Telegram
-                self.tg_api.send_message_with_buttons(
-                    message="🎨 *Контроль зображень*\n\nВсі зображення згенеровано\\. Будь ласка, перегляньте та відредагуйте їх у програмі, перш ніж продовжити монтаж\\.",
-                    buttons=[
-                        {"text": "✅ Продовжити монтаж", "callback_data": "continue_montage_action"}
-                    ]
-                )
-
-                self.image_control_active.wait()
-            else:
-                logger.info("Гібридний режим -> Етап 3: Пауза вимкнена або не потрібна, перехід до монтажу.")
-
-            # Phase 4: Final montage and language reports
-            self.update_progress(self._t('phase_4_final_montage'))
-            logger.info("Hybrid mode -> Phase 4: Starting final montage and language reports.")
-
-            for task_key, data in sorted(processing_data.items()):
-                lang_code = task_key[1]
-                task_idx_str = task_key[0]
-                status_key = f"{task_idx_str}_{lang_code}"
-                
-                if data.get('task') and data.get('text_results') and data['task']['steps'][lang_code].get('create_video'):
-                    
-                    images_folder = data['text_results']['images_folder']
-                    all_images = sorted([os.path.join(images_folder, f) for f in os.listdir(images_folder) if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
-                    
-                    if not data.get('audio_chunks') or not data.get('subs_chunks'):
-                        logger.error(f"Audio or subtitles missing for task {task_key}. Skipping video montage.")
-                        if status_key in self.task_completion_status:
-                            step_name = self._t('step_name_create_video')
-                            self.task_completion_status[status_key]['steps'][step_name] = "❌"
-                        continue
-                        
-                    if not all_images:
-                        logger.error(f"Зображення не знайдено для завдання {task_key}. Пропускаємо монтаж відео.")
-                        if status_key in self.task_completion_status:
-                            step_name = self._t('step_name_create_video')
-                            self.task_completion_status[status_key]['steps'][step_name] = "❌"
-                        continue
-
-                    image_chunks = np.array_split(all_images, len(data['audio_chunks']))
-                    
-                    video_chunk_paths = []
-                    num_montage_threads = self.config.get('parallel_processing', {}).get('num_chunks', 3)
-
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=num_montage_threads) as executor:
-                        video_futures = {
-                            executor.submit(
-                                self._video_chunk_worker, 
-                                list(image_chunks[i]), 
-                                data['audio_chunks'][i], 
-                                data['subs_chunks'][i],
-                                os.path.join(data['temp_dir'], f"video_chunk_{i}.mp4"),
-                                i + 1, len(data['audio_chunks'])
-                            ): i for i in range(len(data['audio_chunks']))
-                        }
-                        for f in concurrent.futures.as_completed(video_futures):
-                            result = f.result()
-                            if result: video_chunk_paths.append(result)
-
-                    if len(video_chunk_paths) == len(data['audio_chunks']):
-                        if 'video_title' in data['text_results']:
-                            base_name = sanitize_filename(data['text_results']['video_title'])
-                        else:
-                            base_name = sanitize_filename(data['text_results'].get('task_name', f"Task_{task_key[0]}"))
-                        
-                        final_video_path = os.path.join(data['text_results']['output_path'], f"video_{base_name}_{lang_code}.mp4")
-                        if self._concatenate_videos(sorted(video_chunk_paths), final_video_path):
-                            logger.info(f"УСПІХ: Створено фінальне відео: {final_video_path}")
-                            if status_key in self.task_completion_status:
-                                step_name = self._t('step_name_create_video')
-                                self.task_completion_status[status_key]['steps'][step_name] = "✅"
-                            if is_rewrite:
-                                self.save_processed_link(data['task']['original_filename'])
-                        else:
-                             if status_key in self.task_completion_status:
-                                step_name = self._t('step_name_create_video')
-                                self.task_completion_status[status_key]['steps'][step_name] = "❌"
-                    else:
-                        logger.error(f"ПОМИЛКА: Не вдалося створити всі частини відео для завдання {task_key}.")
-                        if status_key in self.task_completion_status:
-                            step_name = self._t('step_name_create_video')
-                            self.task_completion_status[status_key]['steps'][step_name] = "❌"
-                
-                # Відправка звіту після завершення обробки однієї мови
-                report_timing = self.config.get("telegram", {}).get("report_timing", "per_task")
-                if report_timing == "per_language":
-                    self.send_task_completion_report(data['task'], single_lang_code=lang_code)
-
-            # --- ФІНАЛЬНИЙ КРОК: ВІДПРАВКА ЗВІТІВ ДЛЯ ВСЬОГО ЗАВДАННЯ ---
-            logger.info("Гібридний режим -> Всі завдання завершено. Відправка фінальних звітів...")
-            report_timing = self.config.get("telegram", {}).get("report_timing", "per_task")
-            if report_timing == "per_task":
-                for task_config in queue_to_process:
-                    self.send_task_completion_report(task_config)
-            
-            self.root.after(0, lambda: self.progress_label.config(text=self._t('status_complete')))
-            self.root.after(0, lambda: messagebox.showinfo(self._t('queue_title'), self._t('info_queue_complete')))
-
-        except Exception as e:
-            logger.exception(f"CRITICAL ERROR: Unexpected error in hybrid queue processing: {e}")
-        finally:
-            # Cleanup temporary files
-            keep_temp_files = self.config.get('parallel_processing', {}).get('keep_temp_files', False)
-            if not keep_temp_files:
-                self.update_progress(self._t('phase_cleaning_up'))
-                for task_key, data in processing_data.items():
-                    if 'temp_dir' in data and os.path.exists(data['temp_dir']):
-                        try:
-                            shutil.rmtree(data['temp_dir'])
-                            logger.info(f"Cleaned temporary directory: {data['temp_dir']}")
-                        except Exception as e:
-                            logger.error(f"Failed to delete temporary directory {data['temp_dir']}: {e}")
-
-            self.stop_telegram_polling.set()
-            self._update_button_states(is_processing=False, is_image_stuck=False)
-            if is_rewrite:
-                self.is_processing_rewrite_queue = False
-                self.root.after(0, self.update_rewrite_queue_display)
-            else:
-                self.is_processing_queue = False
-                self.root.after(0, self.update_queue_display)
-            
-            if hasattr(self, 'pause_resume_button'):
-                 self.root.after(0, lambda: self.pause_resume_button.config(text=self._t('pause_button'), state="disabled"))
-            self.pause_event.set()
-
-    def _text_processing_worker(self, task, lang_code):
-        """Execute all text operations for a single language task."""
-        try:
-            lang_name = lang_code.upper()
-            lang_config = self.config["languages"][lang_code]
-            lang_steps = task['steps'][lang_code]
-            output_cfg = self.config.get("output_settings", {})
-            use_default_dir = output_cfg.get("use_default_dir", False)
-
-            # Визначення шляху для збереження
-            if use_default_dir:
-                task_name = sanitize_filename(task.get('task_name', f"Task_{int(time.time())}"))
-                output_path = os.path.join(output_cfg.get("default_dir", ""), task_name, lang_name)
-            else:
-                output_path = task['lang_output_paths'].get(lang_code)
-            
-            if not output_path:
-                logger.error(f"Немає шляху виводу для {lang_name} у завданні {task.get('task_name')}.")
-                return None
-            os.makedirs(output_path, exist_ok=True)
-
-            text_to_process = task['input_text']
-            translation_path = os.path.join(output_path, "translation.txt")
-
-            # Translation logic
-            if lang_steps.get('translate'):
-                translated_text = self.or_api.translate_text(
-                    task['input_text'], self.config["openrouter"]["translation_model"],
-                    self.config["openrouter"]["translation_params"], lang_name,
-                    custom_prompt_template=lang_config.get("prompt")
-                )
-                if translated_text:
-                    text_to_process = translated_text
-                    with open(translation_path, 'w', encoding='utf-8') as f:
-                        f.write(translated_text)
-                else:
-                    logger.error(f"Translation failed for {lang_name}.")
-                    return None
-            elif os.path.exists(translation_path):
-                 with open(translation_path, 'r', encoding='utf-8') as f:
-                    text_to_process = f.read()
-                 logger.info(f"Using existing translation file for {lang_name}: {translation_path}")
-            else:
-                logger.info(f"Translation step is disabled and no existing translation file was found for {lang_name}. Using original text.")
-                text_to_process = task['input_text']
-
-            cta_text, raw_prompts = None, None
-            prompts_path = os.path.join(output_path, "image_prompts.txt")
-            
-            # Generate CTA (always from text_to_process)
-            if lang_steps.get('cta'):
-                 cta_text = self.or_api.generate_call_to_action(text_to_process, self.config["openrouter"]["cta_model"], self.config["openrouter"]["cta_params"], lang_name)
-                 if cta_text:
-                     with open(os.path.join(output_path, "call_to_action.txt"), 'w', encoding='utf-8') as f: f.write(cta_text)
-
-            # Generate or read prompts
-            image_prompts = []
-            if lang_steps.get('gen_prompts'):
-                raw_prompts = self.or_api.generate_image_prompts(text_to_process, self.config["openrouter"]["prompt_model"], self.config["openrouter"]["prompt_params"], lang_name)
-                if raw_prompts:
-                    with open(prompts_path, 'w', encoding='utf-8') as f: f.write(raw_prompts)
-            elif os.path.exists(prompts_path):
-                logger.info(f"Using existing prompts file: {prompts_path}")
-                with open(prompts_path, 'r', encoding='utf-8') as f:
-                    raw_prompts = f.read()
-
-            if raw_prompts:
-                # Універсальна логіка: об'єднуємо багаторядкові промпти, а потім розділяємо за нумерацією
-                # Спочатку замінюємо всі переноси рядків на пробіли
-                single_line_text = raw_prompts.replace('\n', ' ').strip()
-                # Розділяємо за шаблоном "число." (наприклад, "1.", "2." і т.д.), видаляючи сам роздільник
-                prompt_blocks = re.split(r'\s*\d+[\.\)]\s*', single_line_text)
-                # Перший елемент після розділення зазвичай порожній, тому відфільтровуємо його
-                image_prompts = [block.strip() for block in prompt_blocks if block.strip()]
-
-            images_folder = os.path.join(output_path, "images")
-            os.makedirs(images_folder, exist_ok=True)
-
-            return {
-                "text_to_process": text_to_process,
-                "output_path": output_path,
-                "prompts": image_prompts,
-                "images_folder": images_folder,
-                "task_name": task.get('task_name', 'Untitled_Task')
-            }
-        except Exception as e:
-            logger.exception(f"Error in text processing worker for {lang_code}: {e}")
-            return None
-
-    def _audio_worker(self, data):
-        """Генерує ТІЛЬКИ аудіо для одного мовного завдання (для паралельного запуску)."""
-        try:
-            task = data['task']
-            lang_code = data['text_results']['output_path'].split(os.sep)[-1].lower()
-            lang_steps = task['steps'][lang_code]
-            output_path = data['text_results']['output_path']
-            text_to_process = data['text_results']['text_to_process']
-            lang_config = self.config["languages"][lang_code]
-            
-            audio_path = os.path.join(output_path, "audio.mp3")
-
-            if lang_steps.get('audio'):
-                logger.info(f"[AudioWorker] Starting parallel audio generation for {lang_code}...")
-                tts_service = lang_config.get("tts_service", "elevenlabs")
-                if tts_service == "elevenlabs":
-                    task_id = self.el_api.create_audio_task(text_to_process, lang_config.get("elevenlabs_template_uuid"))
-                    if task_id and self.wait_for_elevenlabs_task(task_id, audio_path):
-                        logger.info(f"[AudioWorker] ElevenLabs audio saved for {lang_code}.")
-                        return audio_path
-                elif tts_service == "voicemaker":
-                    success, _ = self.vm_api.generate_audio(text_to_process, lang_config.get("voicemaker_voice_id"), lang_config.get("voicemaker_engine"), lang_code, audio_path)
-                    if success:
-                        return audio_path
-            
-            return None # Повертаємо None, якщо аудіо не створювалося або сталася помилка
-        except Exception as e:
-            logger.exception(f"Error in parallel audio worker: {e}")
-            return None
-        
-    def _parallel_audio_master(self, processing_data):
-        """Головний потік, що керує паралельною генерацією всіх аудіофайлів."""
-        logger.info("[Image Control] Audio Master Thread: Starting parallel audio generation.")
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            audio_futures = {}
-            for task_key, data in processing_data.items():
-                if data.get('text_results') and data['task']['steps'][task_key[1]].get('audio'):
-                    future = executor.submit(self._audio_worker, data)
-                    audio_futures[future] = task_key
-            
-            for future in concurrent.futures.as_completed(audio_futures):
-                task_key = audio_futures[future]
-                # Результат (шлях до аудіо) записується в загальний словник
-                processing_data[task_key]['audio_path'] = future.result()
-        logger.info("[Image Control] Audio Master Thread: All audio generation tasks complete.")
-
-    def _sequential_image_master(self, processing_data, queue_to_process):
-        """Головний потік, що керує послідовною генерацією всіх зображень."""
-        logger.info("[Image Control] Image Master Thread: Starting sequential image generation.")
-        for task_key, data in sorted(processing_data.items()):
-            task_idx_str, lang_code = task_key
-            status_key = f"{task_idx_str}_{lang_code}"
-            step_name = self._t('step_name_gen_images')
-
-            if data.get('text_results') and data['task']['steps'][lang_code].get('gen_images'):
-                success = self._image_generation_worker(data, task_key, task_idx_str + 1, len(queue_to_process))
-                if status_key in self.task_completion_status:
-                    # Тепер ми перевіряємо, чи були згенеровані якісь зображення
-                    if self.task_completion_status[status_key]["images_generated"] > 0:
-                        self.task_completion_status[status_key]['steps'][step_name] = "✅"
-                    else:
-                        # Якщо жодного зображення не згенеровано, вважаємо крок проваленим
-                        self.task_completion_status[status_key]['steps'][step_name] = "❌"
-            else:
-                if status_key in self.task_completion_status and step_name in self.task_completion_status[status_key]['steps']:
-                    self.task_completion_status[status_key]['steps'][step_name] = "⚪️" # Mark as skipped, not failed
-
-        logger.info("[Image Control] Image Master Thread: All image generation tasks complete.")
 
     def _check_app_state(self):
         """Перевіряє, чи не зупинено програму. Повертає False, якщо треба зупинити потік."""
@@ -1853,7 +1006,7 @@ class TranslationApp:
                     self._update_elevenlabs_balance_labels(new_balance)
                 if task_id and task_id != "INSUFFICIENT_BALANCE":
                     logger.info(f"[Chain] ElevenLabs audio task created: {task_id}. Waiting for result...")
-                    if self.wait_for_elevenlabs_task(task_id, audio_file_path):
+                    if self.el_api.wait_for_elevenlabs_task(self, task_id, audio_file_path):
                         logger.info(f"[Chain] Audio for {lang_name} successfully saved.")
                         self._send_telegram_notification('audio', lang_name, task_num, total_tasks)
                     else:
@@ -1960,117 +1113,13 @@ class TranslationApp:
             self.update_progress(progress_text, increment_step=True)
 
     def send_telegram_error_notification(self, task_name, lang_code, step, error_details):
-        """Негайно відправляє сповіщення про помилку."""
-        message = (
-            f"❌ *Виникла помилка під час виконання\\!* ❌\n\n"
-            f"*Завдання:* {self._escape_markdown(task_name)}\n"
-            f"*Мова:* {self._escape_markdown(lang_code.upper())}\n"
-            f"*Етап:* {self._escape_markdown(step)}\n"
-            f"*Помилка:* {self._escape_markdown(error_details)}"
-        )
-        self.tg_api.send_message_in_thread(message)
+        """Негайно відправляє сповіщення про помилку - delegates to utility function."""
+        send_telegram_error_notification(self, task_name, lang_code, step, error_details)
 
     def send_task_completion_report(self, task_config, single_lang_code=None):
-        """Формує та відправляє фінальний звіт по завершенню всього завдання або однієї мови."""
-        task_name = self._escape_markdown(task_config.get('task_name', 'Невідоме завдання'))
-        
-        langs_to_report = [single_lang_code] if single_lang_code else task_config['selected_langs']
-        
-        # Визначаємо заголовок
-        if single_lang_code:
-            escaped_lang_code = self._escape_markdown(single_lang_code.upper())
-            report_lines = [f"✅ *Завдання \"{task_name}\" для мови {escaped_lang_code} завершено\\!* ✅\n"]
-        else:
-            report_lines = [f"✅ *Завдання \"{task_name}\" повністю завершено\\!* ✅\n"]
+        """Формує та відправляє фінальний звіт по завершенню всього завдання або однієї мови - delegates to utility function."""
+        send_task_completion_report(self, task_config, single_lang_code)
 
-        task_key_prefix = f"{task_config['task_index']}_"
-
-        for lang_code in langs_to_report:
-            task_key = task_key_prefix + lang_code
-            status = self.task_completion_status.get(task_key)
-            if not status: continue
-
-            report_lines.append(self._escape_markdown(f"---"))
-            lang_flags = {"it": "🇮🇹", "ro": "🇷🇴", "ua": "🇺🇦", "en": "🇬🇧", "pl": "🇵🇱", "de": "🇩🇪", "fr": "🇫🇷", "es": "🇪🇸"}
-            flag = lang_flags.get(lang_code.lower(), "")
-            escaped_lang_code = self._escape_markdown(lang_code.upper())
-            report_lines.append(f"{flag} *Мова: {escaped_lang_code}*")
-            report_lines.append(self._escape_markdown(f"---"))
-
-            # Проходимо по ключах та значеннях правильно
-            for step_name, result_icon in status['steps'].items():
-                escaped_step_name = self._escape_markdown(step_name)
-                
-                # Спеціальна логіка для кроку генерації зображень
-                if step_name == self._t('step_name_gen_images'):
-                    images_generated = status.get("images_generated", 0)
-                    total_images = status.get("total_images", 0)
-                    count_text = self._escape_markdown(f"({images_generated}/{total_images} шт.)")
-                    
-                    # Визначаємо іконку на основі реальних даних, а не попередньо встановленої
-                    current_icon = result_icon
-                    if total_images > 0: # Якщо зображення планувались
-                        if images_generated == total_images:
-                            current_icon = "✅"
-                        elif images_generated > 0:
-                            current_icon = "⚠️" # Частково виконано
-                        else:
-                            current_icon = "❌"
-                    
-                    # Якщо крок був пропущений (total_images == 0), іконка залишиться "⚪️"
-                    if current_icon == "❌":
-                        report_lines.append(f"• {current_icon} ~{escaped_step_name}~ *{count_text}*")
-                    else:
-                        report_lines.append(f"• {current_icon} {escaped_step_name} *{count_text}*")
-                
-                elif result_icon == "❌":
-                    report_lines.append(f"• {result_icon} ~{escaped_step_name}~")
-                elif result_icon == "⚪️":
-                     skipped_text = self._escape_markdown("(пропущено)")
-                     report_lines.append(f"• {result_icon} {escaped_step_name} *{skipped_text}*")
-                else:
-                    report_lines.append(f"• {result_icon} {escaped_step_name}")
-        
-        self.tg_api.send_message_in_thread("\n".join(report_lines))
-
-    def wait_for_elevenlabs_task(self, task_id, output_path):
-        max_wait_time, wait_interval, waited_time = 600, 15, 0
-        
-        while waited_time < max_wait_time:
-            if not self._check_app_state(): return False
-
-            status = self.el_api.check_task_status(task_id)
-            logger.info(f"[Chain] Audio task {task_id} status: {status}")
-
-            if status == 'ending':
-                logger.info(f"Task {task_id} is ready. Attempting to download.")
-                time.sleep(2)
-                return self.el_api.download_audio(task_id, output_path)
-            
-            if status in ['error', 'error_handled']:
-                logger.error(f"Task {task_id} failed with status '{status}'.")
-                return False
-
-            if status in ['waiting', 'processing']:
-                pass
-            
-            elif status == 'ending_processed':
-                 logger.warning(f"Task {task_id} has status 'ending_processed', which means the audio was already downloaded and possibly deleted.")
-                 return False
-
-            elif status is None:
-                logger.error(f"Failed to get status for task {task_id}. Aborting wait.")
-                return False
-
-            # Робимо очікування переривчастим
-            for _ in range(wait_interval):
-                if not self._check_app_state(): return False
-                time.sleep(1)
-            waited_time += wait_interval
-
-        logger.warning(f"[Chain] Timed out waiting for audio task {task_id}.")
-        return False
-        
     def update_progress(self, text, increment_step=False):
         if increment_step:
             self.current_queue_step += 1
@@ -2082,297 +1131,47 @@ class TranslationApp:
     def update_progress_for_montage(self, message):
         self.root.after(0, lambda: self.progress_label.config(text=message))
         logger.info(f"[Montage Progress] {message}")
-        
-    def _create_scrollable_tab(self, parent_tab):
-        theme_name = self.root.style.theme_use()
-        if theme_name == 'cyborg': canvas_bg = "#060606"
-        elif theme_name == 'darkly': canvas_bg = "#222222"
-        else: canvas_bg = "#ffffff"
-
-        canvas = tk.Canvas(parent_tab, highlightthickness=0, bg=canvas_bg)
-        scrollbar = ttk.Scrollbar(parent_tab, orient="vertical", command=canvas.yview)
-        self.dynamic_scrollbars.append(scrollbar)
-
-        scrollable_frame = ttk.Frame(canvas)
-        frame_id = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-
-        def configure_canvas(event):
-            # ВИПРАВЛЕНО: Прибираємо умову і завжди розтягуємо внутрішній фрейм
-            # на всю ширину канвасу. Це робить поведінку стабільною.
-            canvas.itemconfig(frame_id, width=event.width)
-            canvas.configure(scrollregion=canvas.bbox("all"))
-
-        def configure_scrollable_frame(event):
-            # Оновлюємо скролрегіон, коли змінюється розмір контенту
-            canvas.configure(scrollregion=canvas.bbox("all"))
-
-        canvas.bind('<Configure>', configure_canvas)
-        scrollable_frame.bind('<Configure>', configure_scrollable_frame)
-        
-        canvas.configure(yscrollcommand=scrollbar.set)
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-        self.scrollable_canvases.append(canvas)
-        return canvas, scrollable_frame
-
-    def _create_scrolled_text(self, parent, **kwargs):
-        container = ttk.Frame(parent)
-        scrollbar = ttk.Scrollbar(container, orient="vertical")
-        self.dynamic_scrollbars.append(scrollbar)
-        text_widget = tk.Text(container, yscrollcommand=scrollbar.set, **kwargs)
-        scrollbar.config(command=text_widget.yview)
-        scrollbar.pack(side="right", fill="y")
-        text_widget.pack(side="left", fill="both", expand=True)
-        return text_widget, container
 
 # Test connection methods
     def test_openrouter_connection(self):
-        api_key = self.or_api_key_var.get()
-        temp_config = self.config.copy()
-        temp_config["openrouter"]["api_key"] = api_key
-        temp_api = OpenRouterAPI(temp_config)
-        success, message = temp_api.test_connection()
-        if success:
-            messagebox.showinfo(self._t('test_connection_title_or'), message)
-        else:
-            messagebox.showerror(self._t('test_connection_title_or'), message)
+        """Test OpenRouter connection - delegates to utility function."""
+        test_openrouter_connection(self)
 
     def test_pollinations_connection(self):
-        token = self.poll_token_var.get()
-        model = self.poll_model_var.get()
-        temp_config = self.config.copy()
-        temp_config["pollinations"]["token"] = token
-        temp_config["pollinations"]["model"] = model
-        temp_api = PollinationsAPI(temp_config, self)
-        success, message = temp_api.test_connection()
-        if success:
-            messagebox.showinfo(self._t('test_connection_title_poll'), message)
-        else:
-            messagebox.showerror(self._t('test_connection_title_poll'), message)
+        """Test Pollinations connection - delegates to utility function."""
+        test_pollinations_connection(self)
 
     def test_elevenlabs_connection(self):
-        api_key = self.el_api_key_var.get()
-        temp_config = self.config.copy()
-        temp_config["elevenlabs"]["api_key"] = api_key
-        temp_api = ElevenLabsAPI(temp_config)
-        success, message = temp_api.test_connection()
-        if success:
-            self.el_api = temp_api
-            balance_text = self.el_api.balance if self.el_api.balance is not None else 'N/A'
-            self.settings_el_balance_label.config(text=f"{self._t('balance_label')}: {balance_text}")
-            messagebox.showinfo(self._t('test_connection_title_el'), message)
-        else:
-            messagebox.showerror(self._t('test_connection_title_el'), message)
+        """Test ElevenLabs connection - delegates to utility function."""
+        test_elevenlabs_connection(self)
 
     def test_voicemaker_connection(self):
-        api_key = self.vm_api_key_var.get()
-        temp_config = {"voicemaker": {"api_key": api_key}}
-        temp_api = VoiceMakerAPI(temp_config)
-        balance = temp_api.get_balance()
-        if balance is not None:
-            if 'voicemaker' not in self.config: self.config['voicemaker'] = {}
-            self.config['voicemaker']['last_known_balance'] = balance
-            save_config(self.config)
-            vm_text = balance
-            self.root.after(0, lambda: self.settings_vm_balance_label.config(text=f"{self._t('balance_label')}: {vm_text}"))
-            self.root.after(0, lambda: self.chain_vm_balance_label.config(text=f"{self._t('voicemaker_balance_label')}: {vm_text}"))
-            self.root.after(0, lambda: self.rewrite_vm_balance_label.config(text=f"{self._t('voicemaker_balance_label')}: {vm_text}"))
-            message = f"З'єднання з Voicemaker успішне.\nЗалишилось символів: {balance}"
-            messagebox.showinfo(self._t('test_connection_title_vm'), message)
-        else:
-            message = "Не вдалося перевірити з'єднання або отримати баланс Voicemaker."
-            messagebox.showerror(self._t('test_connection_title_vm'), message)
+        """Test Voicemaker connection - delegates to utility function."""
+        test_voicemaker_connection(self)
 
     def test_recraft_connection(self):
-        api_key = self.recraft_api_key_var.get()
-        temp_config = {"recraft": {"api_key": api_key}}
-        temp_api = RecraftAPI(temp_config)
-        success, message = temp_api.test_connection()
-        if success:
-            messagebox.showinfo(self._t('test_connection_title_recraft'), message)
-        else:
-            messagebox.showerror(self._t('test_connection_title_recraft'), message)
+        """Test Recraft connection - delegates to utility function."""
+        test_recraft_connection(self)
 
     def test_telegram_connection(self):
-        api_key = self.tg_api_key_var.get()
-        temp_config = {"telegram": {"api_key": api_key}}
-        temp_api = TelegramAPI(temp_config)
-        success, message = temp_api.test_connection()
-        if success:
-            messagebox.showinfo(self._t('test_connection_title_tg'), message)
-        else:
-            messagebox.showerror(self._t('test_connection_title_tg'), message)
+        """Test Telegram connection - delegates to utility function."""
+        test_telegram_connection(self)
 
     def test_speechify_connection(self):
-        api_key = self.speechify_api_key_var.get()
-        temp_config = {"speechify": {"api_key": api_key}}
-        temp_api = SpeechifyAPI(temp_config)
-        success, message = temp_api.test_connection()
-        if success:
-            messagebox.showinfo(self._t('test_connection_title_speechify'), message)
-        else:
-            messagebox.showerror(self._t('test_connection_title_speechify'), message)
+        """Test Speechify connection - delegates to utility function."""
+        test_speechify_connection(self)
 
     def _update_recraft_substyles(self, event=None):
-        selected_model = self.recraft_model_var.get()
-        selected_style = self.recraft_style_var.get()
-        substyles = RECRAFT_SUBSTYLES.get(selected_model, {}).get(selected_style, [])
-        current_substyle = self.recraft_substyle_var.get()
-        self.recraft_substyle_combo['values'] = substyles
-        if not substyles:
-            self.recraft_substyle_var.set("")
-            self.recraft_substyle_combo.config(state="disabled")
-        else:
-            self.recraft_substyle_combo.config(state="readonly")
-            if current_substyle not in substyles:
-                self.recraft_substyle_var.set("")
+        """Update Recraft substyles - delegates to utility function."""
+        update_recraft_substyles(self, event)
 
     def save_settings(self):
-        if 'parallel_processing' not in self.config: self.config['parallel_processing'] = {}
-        self.config['parallel_processing']['enabled'] = self.parallel_enabled_var.get()
-        self.config['parallel_processing']['num_chunks'] = self.parallel_num_chunks_var.get()
-        self.config['parallel_processing']['keep_temp_files'] = self.parallel_keep_temps_var.get()
-        self.config["openrouter"]["api_key"] = self.or_api_key_var.get()
-        self.config["openrouter"]["translation_model"] = self.or_trans_model_var.get()
-        self.config["openrouter"]["prompt_model"] = self.or_prompt_model_var.get()
-        self.config["openrouter"]["cta_model"] = self.or_cta_model_var.get()
-        self.config["openrouter"]["rewrite_model"] = self.or_rewrite_model_var.get()
-        self.config["openrouter"]["saved_models"] = list(self.or_models_listbox.get(0, tk.END))
-        self.config["openrouter"]["translation_params"]["temperature"] = self.trans_temp_var.get()
-        self.config["openrouter"]["translation_params"]["max_tokens"] = self.trans_tokens_var.get()
-        self.config["openrouter"]["rewrite_params"]["temperature"] = self.rewrite_temp_var.get()
-        self.config["openrouter"]["rewrite_params"]["max_tokens"] = self.rewrite_tokens_var.get()
-        self.config["openrouter"]["prompt_params"]["temperature"] = self.prompt_gen_temp_var.get()
-        self.config["openrouter"]["prompt_params"]["max_tokens"] = self.prompt_gen_tokens_var.get()
-        self.config["openrouter"]["cta_params"]["temperature"] = self.cta_temp_var.get()
-        self.config["openrouter"]["cta_params"]["max_tokens"] = self.cta_tokens_var.get()
-        self.config["default_prompts"]["image_prompt_generation"] = self.prompt_gen_prompt_text.get("1.0", tk.END).strip()
-        self.config["default_prompts"]["call_to_action"] = self.cta_prompt_text.get("1.0", tk.END).strip()
-        self.config["pollinations"]["token"] = self.poll_token_var.get()
-        self.config["pollinations"]["model"] = self.poll_model_var.get()
-        self.config["pollinations"]["width"] = self.poll_width_var.get()
-        self.config["pollinations"]["height"] = self.poll_height_var.get()
-        self.config["pollinations"]["timeout"] = self.poll_timeout_var.get()
-        self.config['ui_settings']['image_generation_api'] = self.active_image_api_var.get()
-        self.config["pollinations"]["remove_logo"] = self.poll_remove_logo_var.get()
-        if 'recraft' not in self.config: self.config['recraft'] = {}
-        self.config['recraft']['api_key'] = self.recraft_api_key_var.get()
-        self.config['recraft']['model'] = self.recraft_model_var.get()
-        self.config['recraft']['style'] = self.recraft_style_var.get()
-        self.config['recraft']['substyle'] = self.recraft_substyle_var.get()
-        self.config['recraft']['size'] = self.recraft_size_var.get().split(' ')[0]
-        self.config['recraft']['negative_prompt'] = self.recraft_negative_prompt_var.get()
-        self.config["elevenlabs"]["api_key"] = self.el_api_key_var.get()
-        if 'voicemaker' not in self.config: self.config['voicemaker'] = {}
-        self.config['voicemaker']['api_key'] = self.vm_api_key_var.get()
-        self.config['voicemaker']['char_limit'] = self.vm_char_limit_var.get()
-
-        # Speechify configuration
-        if 'speechify' not in self.config: self.config['speechify'] = {}
-        self.config['speechify']['api_key'] = self.speechify_api_key_var.get()
-        
-        if 'output_settings' not in self.config: self.config['output_settings'] = {}
-        self.config['output_settings']['use_default_dir'] = self.output_use_default_var.get()
-        self.config['output_settings']['default_dir'] = self.output_default_dir_var.get()
-        self.config['output_settings']['rewrite_default_dir'] = self.output_rewrite_default_dir_var.get()
-        if 'rewrite_settings' not in self.config: self.config['rewrite_settings'] = {}
-        self.config['rewrite_settings']['download_threads'] = self.rewrite_download_threads_var.get()
-        if 'telegram' not in self.config: self.config['telegram'] = {}
-        self.config['telegram']['enabled'] = self.tg_enabled_var.get()
-        self.config['telegram']['api_key'] = self.tg_api_key_var.get()
-        self.config['telegram']['chat_id'] = self.tg_chat_id_var.get()
-
-        if 'firebase' not in self.config: self.config['firebase'] = {}
-        self.config['firebase']['auto_clear_gallery'] = self.firebase_auto_clear_gallery_var.get()
-
-        # Зберігаємо User ID - але тепер це відбувається автоматично
-        # if 'user_settings' not in self.config: self.config['user_settings'] = {}
-        # self.config['user_settings']['user_id'] = self.user_id_var.get()
-
-        # Зберігаємо нове налаштування режиму звіту
-        display_value = self.tg_report_timing_var.get()
-        # Знаходимо ключ ('per_task' або 'per_language') за відображуваним значенням
-        internal_value = next((k for k, v in self.report_timing_display_map.items() if v == display_value), 'per_task')
-        self.config['telegram']['report_timing'] = internal_value
-        # Видаляємо збереження старих налаштувань notify_on
-        if 'notify_on' in self.config['telegram']:
-            del self.config['telegram']['notify_on']
-        if 'montage' not in self.config: self.config['montage'] = {}
-        self.config['montage']['ffmpeg_path'] = self.montage_ffmpeg_path_var.get()
-        self.config['montage']['whisper_model'] = self.montage_whisper_model_var.get()
-        self.config['montage']['motion_enabled'] = self.montage_motion_enabled_var.get()
-        self.config['montage']['motion_type'] = self.montage_motion_type_var.get()
-        self.config['montage']['motion_intensity'] = self.montage_motion_intensity_var.get()
-        self.config['montage']['zoom_enabled'] = self.montage_zoom_enabled_var.get()
-        self.config['montage']['zoom_intensity'] = self.montage_zoom_intensity_var.get()
-        self.config['montage']['zoom_speed'] = self.montage_zoom_speed_var.get()
-        self.config['montage']['transition_effect'] = self.montage_transition_var.get()
-        self.config['montage']['font_size'] = self.montage_font_size_var.get()
-        self.config['montage']['output_framerate'] = self.montage_output_framerate_var.get()
-        if 'codec' not in self.config['montage']: self.config['montage']['codec'] = {}
-        self.config['montage']['codec']['video_codec'] = self.codec_video_codec_var.get()
-        self.config['montage']['codec']['x264_crf'] = self.codec_x264_crf_var.get()
-        self.config['montage']['codec']['nvenc_cq'] = self.codec_nvenc_cq_var.get()
-        self.config['montage']['codec']['amf_usage'] = self.codec_amf_usage_var.get()
-        self.config['montage']['codec']['amf_quality'] = self.codec_amf_quality_var.get()
-        self.config['montage']['codec']['amf_rc'] = self.codec_amf_rc_var.get()
-        self.config['montage']['codec']['amf_bitrate'] = self.codec_amf_bitrate_var.get()
-        self.config['montage']['codec']['vt_bitrate'] = self.codec_vt_bitrate_var.get()
-        if "rewrite_prompt_templates" not in self.config:
-            self.config["rewrite_prompt_templates"] = {}
-        current_templates = list(self.rewrite_templates_listbox.get(0, tk.END))
-        for template_name in list(self.config["rewrite_prompt_templates"].keys()):
-            if template_name not in current_templates:
-                del self.config["rewrite_prompt_templates"][template_name]
-        for template_name in current_templates:
-            if template_name not in self.config["rewrite_prompt_templates"]:
-                 self.config["rewrite_prompt_templates"][template_name] = {}
-        if 'ui_settings' not in self.config: self.config['ui_settings'] = {}
-        self.config['ui_settings']['image_generation_api'] = self.active_image_api_var.get()
-        
-        selected_display_name = self.theme_var.get()
-        self.config['ui_settings']['theme'] = self.theme_map_to_internal.get(selected_display_name, "darkly")
-        
-        self.config['ui_settings']['image_control_enabled'] = self.image_control_var.get()
-        self.config['ui_settings']['auto_switch_service_on_fail'] = self.auto_switch_var.get()
-        self.config['ui_settings']['auto_switch_retry_limit'] = self.auto_switch_retries_var.get()
-
-        save_config(self.config)
-        self.or_api = OpenRouterAPI(self.config)
-        self.poll_api = PollinationsAPI(self.config, self)
-        self.recraft_api = RecraftAPI(self.config)
-        self.el_api = ElevenLabsAPI(self.config)
-        self.vm_api = VoiceMakerAPI(self.config)
-        self.tg_api = TelegramAPI(self.config)
-        self.firebase_api = FirebaseAPI(self.config)
-        self.speechify_api = SpeechifyAPI(self.config)
-        self.montage_api = MontageAPI(self.config, self, self.update_progress_for_montage)
-        setup_ffmpeg_path(self.config)
-        if self.selected_lang_code:
-            self.update_language_voice_dropdowns(self.selected_lang_code)
-        self.update_path_widgets_state()
-        messagebox.showinfo(self._t('saved_title'), self._t('info_settings_saved'))
+        """Зберігає всі налаштування додатку через утиліту settings_utils."""
+        save_settings_util(self)
 
     def update_elevenlabs_info(self, update_templates=True):
-        balance = self.el_api.update_balance()
-        balance_text = balance if balance is not None else 'N/A'
-        
-        # Безпечно оновлюємо GUI тільки якщо головний цикл активний
-        try:
-            self.root.after(0, lambda: self.settings_el_balance_label.config(text=f"{self._t('balance_label')}: {balance_text}"))
-            self.root.after(0, lambda: self.chain_el_balance_label.config(text=f"{self._t('elevenlabs_balance_label')}: {balance_text}"))
-            self.root.after(0, lambda: self.rewrite_el_balance_label.config(text=f"{self._t('elevenlabs_balance_label')}: {balance_text}"))
-        except RuntimeError:
-            # Ігноруємо помилки якщо головний цикл ще не готовий
-            pass
-        
-        templates_len = "N/A"
-        if update_templates:
-            templates = self.el_api.update_templates()
-            if templates:
-                templates_len = len(templates)
-        elif self.el_api.templates:
-            templates_len = len(self.el_api.templates)
+        """Update ElevenLabs API information - delegates to utility function."""
+        update_elevenlabs_info(self, update_templates)
 
     def update_api_balances(self):
         def update_thread():
@@ -2552,9 +1351,6 @@ class TranslationApp:
         # Очищуємо статус готовності до монтажу
         self.firebase_api.clear_montage_ready_status()
         
-        # Більше не ховаємо галерею. Вона залишиться видимою.
-        # Код для приховування видалено.
-        
         # Ховаємо лише саму кнопку "Продовжити", щоб уникнути повторних натискань
         if self.continue_button and self.continue_button.winfo_ismapped():
             self.continue_button.pack_forget()
@@ -2684,7 +1480,6 @@ class TranslationApp:
                     if new_url:
                         # Оновлюємо посилання та timestamp в базі даних
                         self.firebase_api.update_image_in_db(image_id_to_update, new_url)
-                # --- КІНЕЦЬ ОНОВЛЕННЯ ---
 
             else:
                 logger.error(f"Failed to regenerate image: {image_path}")
@@ -2723,137 +1518,6 @@ class TranslationApp:
                 logger.error(f"Could not reload image {image_path}: {e}")
                 error_label = ttk.Label(frame, text=self._t('error_loading_label_text'))
                 error_label.pack(pady=5, side='top', expand=True, fill='both')
-
-    def _sequential_image_master(self, processing_data, queue_to_process):
-        """Головний потік, що керує послідовною генерацією всіх зображень."""
-        logger.info("[Hybrid Mode] Image Master Thread: Starting sequential image generation.")
-        for task_key, data in sorted(processing_data.items()):
-            if data.get('text_results') and data['task']['steps'][task_key[1]].get('gen_images'):
-                self._image_generation_worker(data, task_key, task_key[0] + 1, len(queue_to_process))
-        logger.info("[Hybrid Mode] Image Master Thread: All image generation tasks complete.")
-
-    def _audio_subs_pipeline_master(self, processing_data):
-        """Керує послідовним конвеєром Аудіо -> Субтитри для кожної мови."""
-        logger.info("[Audio/Subs Master] Starting pipeline.")
-        num_parallel_chunks = self.config.get('parallel_processing', {}).get('num_chunks', 3)
-
-        for task_key, data in sorted(processing_data.items()):
-            if not data.get('text_results'): continue
-            
-            task_idx_str, lang_code = task_key
-            status_key = f"{task_idx_str}_{lang_code}"
-            lang_steps = data['task']['steps'][lang_code]
-            lang_config = self.config["languages"][lang_code]
-            tts_service = lang_config.get("tts_service", "elevenlabs")
-            text_to_process = data['text_results']['text_to_process']
-            output_path = data['text_results']['output_path']
-            
-            temp_dir = os.path.join(output_path, "temp_chunks")
-            os.makedirs(temp_dir, exist_ok=True)
-            data['temp_dir'] = temp_dir
-            
-            final_audio_chunks = []
-
-            audio_step_name = self._t('step_name_audio')
-            if lang_steps.get('audio'):
-                voicemaker_limit = self.config.get("voicemaker", {}).get("char_limit", 9900)
-                text_chunks = []
-                if tts_service == "voicemaker" and len(text_to_process) > voicemaker_limit:
-                    text_chunks = chunk_text_voicemaker(text_to_process, voicemaker_limit)
-                elif tts_service == "speechify" and len(text_to_process) > SPEECHIFY_CHAR_LIMIT:
-                    text_chunks = chunk_text_speechify(text_to_process, SPEECHIFY_CHAR_LIMIT, num_parallel_chunks)
-                else:
-                    text_chunks = chunk_text(text_to_process, num_parallel_chunks)
-                
-                if not text_chunks:
-                    logger.error(f"Text for {lang_code} is empty after chunking. Skipping.")
-                    if status_key in self.task_completion_status and audio_step_name in self.task_completion_status[status_key]['steps']:
-                        self.task_completion_status[status_key]['steps'][audio_step_name] = "❌"
-                    continue
-
-                self.update_progress(f"{lang_code.upper()}: Генерація {len(text_chunks)} аудіо-шматків...")
-                initial_audio_chunks = []
-                with concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-                    future_to_chunk = {}
-                    for i, chunk in enumerate(text_chunks):
-                        future = executor.submit(self._audio_generation_worker, chunk, os.path.join(temp_dir, f"audio_chunk_{i}.mp3"), lang_config, lang_code, i + 1, len(text_chunks))
-                        future_to_chunk[future] = i
-                        time.sleep(1)
-                    
-                    results = [None] * len(text_chunks)
-                    for future in concurrent.futures.as_completed(future_to_chunk):
-                        results[future_to_chunk[future]] = future.result()
-                initial_audio_chunks = [r for r in results if r]
-
-                if len(initial_audio_chunks) != len(text_chunks):
-                     logger.error(f"Failed to generate all audio chunks for {lang_code}. Skipping subs/video.")
-                     if status_key in self.task_completion_status and audio_step_name in self.task_completion_status[status_key]['steps']:
-                        self.task_completion_status[status_key]['steps'][audio_step_name] = "❌"
-                     continue
-
-                if (tts_service in ["voicemaker", "speechify"]) and len(initial_audio_chunks) > num_parallel_chunks:
-                    logger.info(f"Merging {len(initial_audio_chunks)} {tts_service} audio chunks into {num_parallel_chunks} final chunks.")
-                    chunk_groups = np.array_split(initial_audio_chunks, num_parallel_chunks)
-                    
-                    for i, group in enumerate(chunk_groups):
-                        if not group.any(): continue
-                        merged_output_file = os.path.join(temp_dir, f"merged_chunk_{lang_code}_{i}.mp3")
-                        if concatenate_audio_files(list(group), merged_output_file):
-                            final_audio_chunks.append(merged_output_file)
-                        else:
-                             logger.error(f"Failed to merge a group of {tts_service} audio files for {lang_code}.")
-                else:
-                    final_audio_chunks = initial_audio_chunks
-                
-                if final_audio_chunks:
-                     if status_key in self.task_completion_status and audio_step_name in self.task_completion_status[status_key]['steps']:
-                        self.task_completion_status[status_key]['steps'][audio_step_name] = "✅"
-                else:
-                    logger.error(f"Audio processing resulted in zero final chunks for {lang_code}.")
-                    if status_key in self.task_completion_status and audio_step_name in self.task_completion_status[status_key]['steps']:
-                        self.task_completion_status[status_key]['steps'][audio_step_name] = "❌"
-            else:
-                logger.info(f"Audio step disabled for {lang_code}. Searching for existing merged audio chunks...")
-                found_chunks = sorted([os.path.join(temp_dir, f) for f in os.listdir(temp_dir) if f.startswith(f'merged_chunk_{lang_code}_') and f.endswith('.mp3')])
-                if found_chunks:
-                    logger.info(f"Found {len(found_chunks)} existing merged audio chunks.")
-                    final_audio_chunks = found_chunks
-                else:
-                    logger.warning(f"No merged audio chunks found for {lang_code}. Dependent steps will be skipped.")
-            
-            if not final_audio_chunks:
-                continue
-
-            data['audio_chunks'] = sorted(final_audio_chunks)
-            subs_chunk_dir = os.path.join(temp_dir, "subs"); os.makedirs(subs_chunk_dir, exist_ok=True)
-            subs_chunk_paths = []
-            
-            subs_step_name = self._t('step_name_create_subtitles')
-            if lang_steps.get('create_subtitles'):
-                self.update_progress(f"{lang_code.upper()}: Генерація субтитрів...")
-                subs_chunk_paths = self._sequential_subtitle_worker(data['audio_chunks'], subs_chunk_dir)
-                
-                if len(subs_chunk_paths) == len(data['audio_chunks']):
-                    if status_key in self.task_completion_status and subs_step_name in self.task_completion_status[status_key]['steps']:
-                        self.task_completion_status[status_key]['steps'][subs_step_name] = "✅"
-                else:
-                    logger.error(f"Failed to generate all subtitle chunks for {lang_code}.")
-                    if status_key in self.task_completion_status and subs_step_name in self.task_completion_status[status_key]['steps']:
-                        self.task_completion_status[status_key]['steps'][subs_step_name] = "❌"
-                    continue
-            else:
-                logger.info(f"Subtitles step disabled for {lang_code}. Searching for existing subtitle chunks...")
-                found_subs = sorted([os.path.join(subs_chunk_dir, f) for f in os.listdir(subs_chunk_dir) if f.startswith('subs_chunk_') and f.endswith('.ass')])
-                if len(found_subs) == len(data['audio_chunks']):
-                     logger.info(f"Found {len(found_subs)} existing subtitle chunks.")
-                     subs_chunk_paths = found_subs
-                else:
-                    logger.warning(f"Found {len(found_subs)} subtitle chunks, but expected {len(data['audio_chunks'])}. Video montage might fail.")
-                    subs_chunk_paths = found_subs 
-
-            data['subs_chunks'] = sorted(subs_chunk_paths)
-
-        logger.info("[Audio/Subs Master] Pipeline finished.")
 
     def populate_rewrite_template_widgets(self):
         templates = self.config.get("rewrite_prompt_templates", {}).keys()
@@ -2996,37 +1660,16 @@ class TranslationApp:
             logger.error(f"Помилка оновлення кольорів віджетів: {e}")
 
     def populate_openrouter_widgets(self):
-        models = self.config["openrouter"].get("saved_models", [])
-        self.or_models_listbox.delete(0, tk.END)
-        for model in models:
-            self.or_models_listbox.insert(tk.END, model)
-        self.or_trans_model_combo['values'] = models
-        self.or_prompt_model_combo['values'] = models
-        self.or_cta_model_combo['values'] = models
-        self.or_rewrite_model_combo['values'] = models
+        """Populate OpenRouter widgets - delegates to utility function."""
+        populate_openrouter_widgets(self)
 
     def add_openrouter_model(self):
-        dialog = CustomAskStringDialog(self.root, self._t('add_model_title'), self._t('add_model_prompt'), self)
-        new_model = dialog.result
-        if new_model:
-            models = self.config["openrouter"].get("saved_models", [])
-            if new_model not in models:
-                models.append(new_model)
-                self.config["openrouter"]["saved_models"] = models
-                self.populate_openrouter_widgets()
-            else:
-                messagebox.showwarning(self._t('warning_title'), self._t('warning_model_exists'))
+        """Add OpenRouter model - delegates to utility function."""
+        add_openrouter_model(self)
 
     def remove_openrouter_model(self):
-        selected_indices = self.or_models_listbox.curselection()
-        if not selected_indices:
-            messagebox.showwarning(self._t('warning_title'), self._t('warning_select_model_to_remove'))
-            return
-        selected_model = self.or_models_listbox.get(selected_indices[0])
-        if messagebox.askyesno(self._t('confirm_title'), f"{self._t('confirm_remove_model')} '{selected_model}'?"):
-            self.or_models_listbox.delete(selected_indices[0])
-            self.config["openrouter"]["saved_models"] = list(self.or_models_listbox.get(0, tk.END))
-            self.populate_openrouter_widgets()
+        """Remove OpenRouter model - delegates to utility function."""
+        remove_openrouter_model(self)
 
     def populate_language_list(self):
         if hasattr(self, 'rewrite_templates_listbox'):
@@ -3055,7 +1698,7 @@ class TranslationApp:
         self.lang_prompt_frame = ttk.Frame(lang_prompt_container, height=initial_lang_height)
         self.lang_prompt_frame.pack(fill="x")
         self.lang_prompt_frame.pack_propagate(False)
-        self.lang_prompt_text, text_container_widget = self._create_scrolled_text(self.lang_prompt_frame, height=3, width=60, relief="flat", insertbackground="white")
+        self.lang_prompt_text, text_container_widget = create_scrolled_text(self, self.lang_prompt_frame, height=3, width=60, relief="flat", insertbackground="white")
         text_container_widget.pack(fill="both", expand=True)
         add_text_widget_bindings(self, self.lang_prompt_text)
         lang_grip = ttk.Frame(lang_prompt_container, height=8, bootstyle="secondary", cursor="sb_v_double_arrow")
@@ -3080,7 +1723,7 @@ class TranslationApp:
         self.rewrite_prompt_frame = ttk.Frame(rewrite_prompt_container, height=initial_rewrite_height)
         self.rewrite_prompt_frame.pack(fill="x")
         self.rewrite_prompt_frame.pack_propagate(False)
-        self.rewrite_prompt_text, text_container_widget = self._create_scrolled_text(self.rewrite_prompt_frame, height=3, width=60, relief="flat", insertbackground="white")
+        self.rewrite_prompt_text, text_container_widget = create_scrolled_text(self, self.rewrite_prompt_frame, height=3, width=60, relief="flat", insertbackground="white")
         text_container_widget.pack(fill="both", expand=True)
         add_text_widget_bindings(self, self.rewrite_prompt_text)
         rewrite_grip = ttk.Frame(rewrite_prompt_container, height=8, bootstyle="secondary", cursor="sb_v_double_arrow")
@@ -3120,7 +1763,7 @@ class TranslationApp:
         
         self.el_voice_frame = ttk.Frame(self.lang_details_frame)
         self.vm_voice_frame = ttk.Frame(self.lang_details_frame)
-        self.speechify_voice_frame = ttk.Frame(self.lang_details_frame) # <-- НОВЕ
+        self.speechify_voice_frame = ttk.Frame(self.lang_details_frame)
 
         # --- ElevenLabs Widgets ---
         ttk.Label(self.el_voice_frame, text=self._t('voice_template_label')).pack(anchor='w')
@@ -3186,13 +1829,13 @@ class TranslationApp:
         service = self.lang_tts_service_var.get()
         self.el_voice_frame.pack_forget()
         self.vm_voice_frame.pack_forget()
-        self.speechify_voice_frame.pack_forget() # <-- ДОДАНО
+        self.speechify_voice_frame.pack_forget()
         if service == 'elevenlabs':
             self.el_voice_frame.pack(fill='x', pady=5)
         elif service == 'voicemaker':
             self.vm_voice_frame.pack(fill='x', pady=5)
-        elif service == 'speechify': # <-- ДОДАНО
-            self.speechify_voice_frame.pack(fill='x', pady=5) # <-- ДОДАНО
+        elif service == 'speechify':
+            self.speechify_voice_frame.pack(fill='x', pady=5) 
 
     def update_language_details(self, code):
         if code in self.config["languages"]:
@@ -3342,133 +1985,6 @@ class TranslationApp:
         if folder:
             self.output_rewrite_default_dir_var.set(folder)
 
-    def _concatenate_videos(self, video_files, output_path):
-        if not video_files:
-            logger.error("No video files to concatenate.")
-            return False
-        
-        self.update_progress(self._t('phase_final_video'))
-        logger.info(f"Concatenating {len(video_files)} video chunks into {output_path}...")
-
-        concat_list_path = os.path.join(os.path.dirname(output_path), "concat_list.txt")
-        with open(concat_list_path, "w", encoding='utf-8') as f:
-            for file_path in video_files:
-                safe_path = file_path.replace("'", "'\\''")
-                f.write(f"file '{safe_path}'\n")
-
-        try:
-            (
-                ffmpeg
-                .input(concat_list_path, format='concat', safe=0)
-                .output(output_path, c='copy')
-                .overwrite_output()
-                .run(capture_stdout=True, capture_stderr=True)
-            )
-            logger.info("Video concatenation successful.")
-            os.remove(concat_list_path)
-            return True
-        except ffmpeg.Error as e:
-            logger.error(f"Failed to concatenate videos. FFmpeg stderr:\n{e.stderr.decode()}")
-            if os.path.exists(concat_list_path):
-                os.remove(concat_list_path)
-            return False
-
-    def _audio_generation_worker(self, text_chunk, output_path, lang_config, lang_code, chunk_index, total_chunks):
-        self.log_context.parallel_task = 'Audio Gen'
-        self.log_context.worker_id = f'Chunk {chunk_index}/{total_chunks}'
-        try:
-            tts_service = lang_config.get("tts_service", "elevenlabs")
-            logger.info(f"Starting audio generation task with {tts_service}")
-            
-            if tts_service == "elevenlabs":
-                task_id = self.el_api.create_audio_task(text_chunk, lang_config.get("elevenlabs_template_uuid"))
-                new_balance = self.el_api.balance
-                if new_balance is not None:
-                    self._update_elevenlabs_balance_labels(new_balance)
-                if task_id and task_id != "INSUFFICIENT_BALANCE":
-                    if self.wait_for_elevenlabs_task(task_id, output_path):
-                        return output_path
-            
-            elif tts_service == "voicemaker":
-                voice_id = lang_config.get("voicemaker_voice_id")
-                engine = lang_config.get("voicemaker_engine")
-                success, new_balance = self.vm_api.generate_audio(text_chunk, voice_id, engine, lang_code, output_path)
-                if success:
-                    if new_balance is not None:
-                        vm_text = new_balance if new_balance is not None else 'N/A'
-                        self.root.after(0, lambda: self.settings_vm_balance_label.config(text=f"{self._t('balance_label')}: {vm_text}"))
-                        self.root.after(0, lambda: self.chain_vm_balance_label.config(text=f"{self._t('voicemaker_balance_label')}: {vm_text}"))
-                        self.root.after(0, lambda: self.rewrite_vm_balance_label.config(text=f"{self._t('voicemaker_balance_label')}: {vm_text}"))
-                    return output_path
-            
-            elif tts_service == "speechify":
-                logger.info("[Chain] Using Speechify for TTS.")
-                success, _ = self.speechify_api.generate_audio_streaming(
-                    text=text_chunk,
-                    voice_id=lang_config.get("speechify_voice_id"),
-                    model=lang_config.get("speechify_model"),
-                    output_path=output_path,
-                    emotion=lang_config.get("speechify_emotion"),
-                    pitch=lang_config.get("speechify_pitch", 0),
-                    rate=lang_config.get("speechify_rate", 0)
-                )
-                if success:
-                    return output_path
-
-            logger.error(f"Failed to generate audio chunk using {tts_service}")
-            return None
-        finally:
-            if hasattr(self.log_context, 'parallel_task'): del self.log_context.parallel_task
-            if hasattr(self.log_context, 'worker_id'): del self.log_context.worker_id
-
-    def _parallel_subtitle_worker(self, audio_chunk_paths: list, subs_chunk_dir: str) -> list:
-        logger.info(f"Starting parallel subtitle generation for {len(audio_chunk_paths)} audio chunks.")
-        subs_chunk_paths = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(audio_chunk_paths)) as executor:
-            future_to_index = {
-                executor.submit(self.montage_api.create_subtitles, audio_path, os.path.join(subs_chunk_dir, f"subs_chunk_{i}.ass")): i
-                for i, audio_path in enumerate(audio_chunk_paths)
-            }
-            for future in concurrent.futures.as_completed(future_to_index):
-                index = future_to_index[future]
-                if future.result():
-                    subs_path = os.path.join(subs_chunk_dir, f"subs_chunk_{index}.ass")
-                    subs_chunk_paths.append(subs_path)
-                else:
-                    logger.error(f"Failed to generate subtitle chunk for index {index}.")
-
-        logger.info(f"Finished subtitle generation. Successfully created {len(subs_chunk_paths)} subtitle files.")
-        return sorted(subs_chunk_paths)
-    
-    def _sequential_subtitle_worker(self, audio_chunk_paths: list, subs_chunk_dir: str) -> list:
-        logger.info(f"Starting sequential subtitle generation for {len(audio_chunk_paths)} audio chunks.")
-        subs_chunk_paths = []
-        total_chunks = len(audio_chunk_paths)
-        for i, audio_path in enumerate(audio_chunk_paths):
-            self.update_progress(self._t('transcribing_chunk', current=i + 1, total=total_chunks))
-            subs_path = os.path.join(subs_chunk_dir, f"subs_chunk_{i}.ass")
-            if self.montage_api.create_subtitles(audio_path, subs_path):
-                subs_chunk_paths.append(subs_path)
-            else:
-                logger.error(f"Failed to generate subtitle chunk for {audio_path}.")
-        
-        logger.info(f"Finished subtitle generation. Successfully created {len(subs_chunk_paths)} subtitle files.")
-        return sorted(subs_chunk_paths)
-
-    def _video_chunk_worker(self, images_for_chunk, audio_path, subs_path, output_path, chunk_index, total_chunks):
-        self.log_context.parallel_task = 'Video Montage'
-        self.log_context.worker_id = f'Chunk {chunk_index}/{total_chunks}'
-        try:
-            logger.info(f"ЗАПУСК FFMPEG (відео шматок {chunk_index}/{total_chunks}) для аудіо: {os.path.basename(audio_path)}")
-            if self.montage_api.create_video(images_for_chunk, audio_path, subs_path, output_path):
-                logger.info(f"ЗАВЕРШЕННЯ FFMPEG (відео шматок {chunk_index}/{total_chunks})")
-                return output_path
-            logger.error(f"ПОМИЛКА FFMPEG (відео шматок {chunk_index}/{total_chunks})")
-            return None
-        finally:
-            if hasattr(self.log_context, 'parallel_task'): del self.log_context.parallel_task
-            if hasattr(self.log_context, 'worker_id'): del self.log_context.worker_id
-
     def _prepare_parallel_audio_chunks(self, text_to_process, lang_config, lang_code, temp_dir, num_parallel_chunks):
         tts_service = lang_config.get("tts_service", "elevenlabs")
         temp_audio_dir = os.path.join(temp_dir, "audio_chunks")
@@ -3492,7 +2008,7 @@ class TranslationApp:
         audio_chunks_paths = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(text_chunks)) as executor:
             future_to_index = {
-                executor.submit(self._audio_generation_worker, chunk, os.path.join(temp_audio_dir, f"chunk_{i}.mp3"), lang_config, lang_code, i + 1, len(text_chunks)): i
+                executor.submit(self.workflow_manager._audio_generation_worker, chunk, os.path.join(temp_audio_dir, f"chunk_{i}.mp3"), lang_config, lang_code, i + 1, len(text_chunks)): i
                 for i, chunk in enumerate(text_chunks)
             }
             results = [None] * len(text_chunks)
@@ -3691,7 +2207,7 @@ class TranslationApp:
                 image_future = None
                 if steps.get('gen_images') and image_prompts:
                     images_folder = os.path.join(lang_output_path, "images"); os.makedirs(images_folder, exist_ok=True)
-                    image_future = executor.submit(self._image_generation_worker, image_prompts, images_folder, lang_name, task_num, total_tasks)
+                    image_future = executor.submit(self.workflow_manager._image_generation_worker, image_prompts, images_folder, lang_name, task_num, total_tasks)
                 
                 final_audio_chunks = []
                 if audio_future:
@@ -3699,7 +2215,7 @@ class TranslationApp:
                     
                 subs_chunk_paths = []
                 if steps.get('create_subtitles') and final_audio_chunks:
-                    subs_chunk_paths = self._sequential_subtitle_worker(final_audio_chunks, subs_chunk_dir)
+                    subs_chunk_paths = self.workflow_manager._sequential_subtitle_worker(final_audio_chunks, subs_chunk_dir)
 
                 if image_future:
                     image_future.result()
@@ -3716,14 +2232,14 @@ class TranslationApp:
             image_chunks = np.array_split(all_images, len(final_audio_chunks))
             video_chunk_paths = []
             with concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-                video_futures = {executor.submit(self._video_chunk_worker, list(image_chunks[i]), final_audio_chunks[i], subs_chunk_paths[i], os.path.join(video_chunk_dir, f"video_chunk_{i}.mp4"), i + 1, len(final_audio_chunks)): i for i in range(len(final_audio_chunks))}
+                video_futures = {executor.submit(video_chunk_worker, self, list(image_chunks[i]), final_audio_chunks[i], subs_chunk_paths[i], os.path.join(video_chunk_dir, f"video_chunk_{i}.mp4"), i + 1, len(final_audio_chunks)): i for i in range(len(final_audio_chunks))}
                 for f in concurrent.futures.as_completed(video_futures):
                     result = f.result()
                     if result: video_chunk_paths.append(result)
             
             if len(video_chunk_paths) == len(final_audio_chunks):
                 final_video_path = os.path.join(lang_output_path, f"video_{sanitize_filename(video_title)}_{lang_code}.mp4")
-                if self._concatenate_videos(sorted(video_chunk_paths), final_video_path):
+                if concatenate_videos(self, sorted(video_chunk_paths), final_video_path):
                     logger.info(f"Successfully created final video: {final_video_path}")
                     self._send_telegram_notification('create_video', lang_name, task_num, total_tasks)
             
@@ -3733,137 +2249,29 @@ class TranslationApp:
                  shutil.rmtree(temp_dir)
                  logger.info(f"Cleaned up temp directory: {temp_dir}")
 
-    def save_user_id(self):
-        """DEPRECATED: User ID тепер генерується автоматично."""
-        # Цей метод більше не потрібен, ID генерується автоматично
-        pass
-
     def clear_user_logs(self):
         """Очищує логи поточного користувача."""
-        if not hasattr(self, 'firebase_api') or not self.firebase_api or not self.firebase_api.is_initialized:
-            messagebox.showerror(self._t('error_title'), "Firebase не підключено!")
-            return
-            
-        user_id = self.firebase_api.get_current_user_id()
-        if not user_id or user_id == "default":
-            messagebox.showerror(self._t('error_title'), "User ID не ініціалізовано!")
-            return
-            
-        if messagebox.askyesno(self._t('confirm_title'), 
-                             f"Очистити всі логи для користувача '{user_id}'?\n\nЦе дія незворотна!"):
-            success = self.firebase_api.clear_user_logs()
-            if success:
-                self.refresh_user_stats()
-                messagebox.showinfo(self._t('info_title'), "Ваші логи успішно очищено!")
-            else:
-                messagebox.showerror(self._t('error_title'), "Помилка очищення логів!")
+        clear_user_logs(self)
 
     def clear_user_images(self):
         """Очищує зображення поточного користувача."""
-        if not hasattr(self, 'firebase_api') or not self.firebase_api or not self.firebase_api.is_initialized:
-            messagebox.showerror(self._t('error_title'), "Firebase не підключено!")
-            return
-            
-        user_id = self.firebase_api.get_current_user_id()
-        if not user_id or user_id == "default":
-            messagebox.showerror(self._t('error_title'), "User ID не ініціалізовано!")
-            return
-            
-        if messagebox.askyesno(self._t('confirm_title'), 
-                             f"Очистити всі зображення для користувача '{user_id}'?\n\nЦе дія незворотна!"):
-            success = self.firebase_api.clear_user_images()
-            if success:
-                self.refresh_user_stats()
-                messagebox.showinfo(self._t('info_title'), "Ваші зображення успішно очищено!")
-            else:
-                messagebox.showerror(self._t('error_title'), "Помилка очищення зображень!")
+        clear_user_images(self)
 
     def refresh_user_stats(self):
         """Оновлює статистику поточного користувача та відображення User ID."""
-        if not hasattr(self, 'firebase_api') or not self.firebase_api or not self.firebase_api.is_initialized:
-            if hasattr(self, 'user_stats_label'):
-                self.user_stats_label.config(text="Firebase не підключено")
-            if hasattr(self, 'current_user_id_label'):
-                self.current_user_id_label.config(text="Firebase не підключено")
-            return
-            
-        user_id = self.firebase_api.get_current_user_id()
-        if not user_id:
-            if hasattr(self, 'user_stats_label'):
-                self.user_stats_label.config(text="User ID не ініціалізовано")
-            if hasattr(self, 'current_user_id_label'):
-                self.current_user_id_label.config(text="Не ініціалізовано")
-            return
-            
-        # Оновлюємо відображення User ID
-        if hasattr(self, 'current_user_id_label'):
-            self.current_user_id_label.config(text=user_id)
-            
-        # Оновлюємо статистику
-        stats = self.firebase_api.get_user_stats()
-        if stats and hasattr(self, 'user_stats_label'):
-            stats_text = f"Користувач: {user_id} | Логи: {stats['logs']} | Зображення: {stats['images']}"
-            self.user_stats_label.config(text=stats_text)
-        elif hasattr(self, 'user_stats_label'):
-            self.user_stats_label.config(text=f"Користувач: {user_id} | Помилка завантаження статистики")
+        refresh_user_stats(self)
 
     def refresh_firebase_stats(self):
         """Оновлює статистику Firebase."""
-        if not hasattr(self, 'firebase_api') or not self.firebase_api or not self.firebase_api.is_initialized:
-            if hasattr(self, 'firebase_logs_stat_var'):
-                self.firebase_logs_stat_var.set("Firebase not connected")
-            if hasattr(self, 'firebase_images_stat_var'):
-                self.firebase_images_stat_var.set("Firebase not connected")
-            return
-            
-        try:
-            stats = self.firebase_api.get_user_stats()
-            if stats:
-                if hasattr(self, 'firebase_logs_stat_var'):
-                    self.firebase_logs_stat_var.set(str(stats['logs']))
-                if hasattr(self, 'firebase_images_stat_var'):
-                    self.firebase_images_stat_var.set(str(stats['images']))
-                if hasattr(self, 'firebase_user_id_var'):
-                    self.firebase_user_id_var.set(self.firebase_api.get_current_user_id() or "Not available")
-            else:
-                if hasattr(self, 'firebase_logs_stat_var'):
-                    self.firebase_logs_stat_var.set("Error loading")
-                if hasattr(self, 'firebase_images_stat_var'):
-                    self.firebase_images_stat_var.set("Error loading")
-        except Exception as e:
-            print(f"Error refreshing Firebase stats: {e}")
-            if hasattr(self, 'firebase_logs_stat_var'):
-                self.firebase_logs_stat_var.set("Error")
-            if hasattr(self, 'firebase_images_stat_var'):
-                self.firebase_images_stat_var.set("Error")
+        refresh_firebase_stats(self)
 
     def clear_firebase_logs(self):
         """Очищає логи Firebase."""
-        if not hasattr(self, 'firebase_api') or not self.firebase_api or not self.firebase_api.is_initialized:
-            messagebox.showerror("Error", "Firebase not connected!")
-            return
-            
-        if messagebox.askyesno("Confirm", "Clear all your logs from Firebase?\n\nThis action cannot be undone!"):
-            success = self.firebase_api.clear_user_logs()
-            if success:
-                self.refresh_firebase_stats()
-                messagebox.showinfo("Success", "Your logs have been cleared!")
-            else:
-                messagebox.showerror("Error", "Failed to clear logs!")
+        clear_firebase_logs(self)
 
     def clear_firebase_images(self):
         """Очищає зображення Firebase."""
-        if not hasattr(self, 'firebase_api') or not self.firebase_api or not self.firebase_api.is_initialized:
-            messagebox.showerror("Error", "Firebase not connected!")
-            return
-            
-        if messagebox.askyesno("Confirm", "Clear all your images from Firebase?\n\nThis action cannot be undone!"):
-            success = self.firebase_api.clear_user_images()
-            if success:
-                self.refresh_firebase_stats()
-                messagebox.showinfo("Success", "Your images have been cleared!")
-            else:
-                messagebox.showerror("Error", "Failed to clear images!")
+        clear_firebase_images(self)
 
 if __name__ == "__main__":
     """Main entry point for the Content Translation and Generation Application.

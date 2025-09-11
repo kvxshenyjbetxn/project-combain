@@ -3,7 +3,7 @@ import ttkbootstrap as ttk
 import logging
 import re
 
-from .gui_utils import add_text_widget_bindings
+from .gui_utils import add_text_widget_bindings, create_scrolled_text
 from constants.log_filters import is_technical_message, should_send_to_firebase
 
 # Отримуємо існуючий логер, створений у головному файлі
@@ -18,7 +18,7 @@ def create_log_tab(notebook, app):
     main_log_frame = ttk.Labelframe(app.log_frame, text=app._t('main_log_label'))
     main_log_frame.pack(fill='both', expand=True, padx=5, pady=(5, 2))
 
-    app.log_text, text_container_widget = app._create_scrolled_text(main_log_frame, state='disabled', font=("Courier New", 9))
+    app.log_text, text_container_widget = create_scrolled_text(app, main_log_frame, state='disabled', font=("Courier New", 9))
     text_container_widget.pack(fill='both', expand=True, padx=5, pady=5)
     add_text_widget_bindings(app, app.log_text)
 
@@ -87,7 +87,7 @@ def create_log_tab(notebook, app):
 
         ttk.Label(chunk_frame, text=app._t('thread_label', thread_num=i + 1), bootstyle="secondary").pack(fill='x')
         
-        log_widget, text_container_widget = app._create_scrolled_text(chunk_frame, state='disabled', font=("Courier New", 8))
+        log_widget, text_container_widget = create_scrolled_text(app, chunk_frame, state='disabled', font=("Courier New", 8))
         text_container_widget.pack(fill='both', expand=True)
         add_text_widget_bindings(app, log_widget)
         app.parallel_log_widgets.append(log_widget)

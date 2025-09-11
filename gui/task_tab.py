@@ -83,10 +83,12 @@ def create_task_tab(notebook, app):
     'notebook' - це головний записник, куди буде додано вкладку.
     'app' - це посилання на головний клас програми для доступу до його функцій та змінних.
     """
+    from gui.gui_utils import create_scrollable_tab, create_scrolled_text
+    
     app.chain_frame = ttk.Frame(notebook)
     notebook.add(app.chain_frame, text=app._t('create_task_tab'))
     
-    app.chain_canvas, app.chain_scrollable_frame = app._create_scrollable_tab(app.chain_frame)
+    app.chain_canvas, app.chain_scrollable_frame = create_scrollable_tab(app, app.chain_frame)
     
     input_frame = ttk.Labelframe(app.chain_scrollable_frame, text=app._t('input_text_label'))
     input_frame.pack(fill='x', expand=True, padx=10, pady=5)
@@ -104,7 +106,7 @@ def create_task_tab(notebook, app):
     app.main_text_frame.pack(fill="x", expand=False)
     app.main_text_frame.pack_propagate(False)
 
-    app.input_text, text_container_widget = app._create_scrolled_text(app.main_text_frame, height=10, relief="flat", insertbackground="white")
+    app.input_text, text_container_widget = create_scrolled_text(app, app.main_text_frame, height=10, relief="flat", insertbackground="white")
     text_container_widget.pack(fill='both', expand=True)
     add_text_widget_bindings(app, app.input_text)
 
