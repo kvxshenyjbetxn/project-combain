@@ -397,20 +397,72 @@ class AudioWorkerPool:
         try:
             if tts_service in ['voicemaker', 'speechify']:
                 # Для VoiceMaker та Speechify створюємо об'єднані групи
-                merged_groups = self._create_merged_audio_groups()
-                
-                for group in merged_groups:
-                    # Створюємо елемент для транскрипції об'єднаної групи
-                    self.queue_audio_for_transcription(
-                        audio_path=group['merged_path'],
-                        output_dir=group['items'][0].output_dir,
-                        chunk_index=group['items'][0].chunk_index,  # Використовуємо індекс першої частини
-                        lang_code=group['items'][0].lang_code,
-                        task_key=group['task_key'],
-                        is_merged_group=True
-                    )
+                with self.completed_audio_lock:
+                    # Групуємо за завданнями
+                    tasks_groups = {}
+                    for item in list(self.completed_audio_items):
+                        if item.task_key not in tasks_groups:
+                            tasks_groups[item.task_key] = []
+                        tasks_groups[item.task_key].append(item)
                     
-                    print(f"Додано об'єднану групу в транскрипцію: {len(group['items'])} частин -> {group['merged_path']}")
+                    # Обробляємо кожне завдання окремо
+                    for task_key, items in tasks_groups.items():
+                        if len(items) < 2:
+                            # Якщо менше 2 частин, обробляємо індивідуально
+                            for item in items:
+                                self.queue_audio_for_transcription(
+                                    audio_path=item.audio_path,
+                                    output_dir=item.output_dir,
+                                    chunk_index=item.chunk_index,
+                                    lang_code=item.lang_code,
+                                    task_key=item.task_key,
+                                    is_merged_group=False
+                                )
+                                self.completed_audio_items.remove(item)
+                            continue
+                        
+                        # Сортуємо за chunk_index
+                        items.sort(key=lambda x: x.chunk_index)
+                        
+                        # Розбиваємо на групи (використовуємо 3 як target групи для 3 потоків)
+                        import numpy as np
+                        target_groups = min(3, len(items))  # Не більше 3 груп
+                        chunk_groups = np.array_split(items, target_groups)
+                        
+                        for i, group in enumerate(chunk_groups):
+                            if len(group) == 0:
+                                continue
+                                
+                            if len(group) == 1:
+                                # Одна частина - обробляємо індивідуально
+                                item = group[0]
+                                self.queue_audio_for_transcription(
+                                    audio_path=item.audio_path,
+                                    output_dir=item.output_dir,
+                                    chunk_index=item.chunk_index,
+                                    lang_code=item.lang_code,
+                                    task_key=item.task_key,
+                                    is_merged_group=False
+                                )
+                            else:
+                                # Кілька частин - об'єднуємо в групу
+                                merged_path = self._merge_audio_files_for_transcription(list(group), f"{task_key}_group_{i}")
+                                if merged_path:
+                                    self.queue_audio_for_transcription(
+                                        audio_path=merged_path,
+                                        output_dir=group[0].output_dir,
+                                        chunk_index=group[0].chunk_index,
+                                        lang_code=group[0].lang_code,
+                                        task_key=task_key,
+                                        is_merged_group=True
+                                    )
+                                    print(f"Додано об'єднану групу {i+1} в транскрипцію: {len(group)} частин -> {merged_path}")
+                        
+                        # Видаляємо оброблені елементи
+                        for item in items:
+                            if item in self.completed_audio_items:
+                                self.completed_audio_items.remove(item)
+                                
             else:
                 # Для ElevenLabs та інших сервісів обробляємо індивідуальні частини
                 with self.completed_audio_lock:
