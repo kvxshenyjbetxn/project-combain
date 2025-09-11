@@ -960,12 +960,25 @@ class WorkflowManager:
             temp_dir = info['temp_dir']
             lang_code = info['lang_code']
             
-            # Шукаємо аудіо файли в temp_chunks
+            # Спочатку шукаємо файли в batch_merged папці (для VoiceMaker batch обробки)
+            batch_merged_dir = os.path.join(temp_dir, "batch_merged")
             audio_files = []
-            for i in range(3):  # Стандартно 3 чанки
-                audio_file = os.path.join(temp_dir, f"audio_chunk_{i}.mp3")
-                if os.path.exists(audio_file):
-                    audio_files.append(audio_file)
+            
+            if os.path.exists(batch_merged_dir):
+                # Шукаємо в batch_merged папці з новими назвами
+                for i in range(3):  # Стандартно 3 чанки
+                    audio_file = os.path.join(batch_merged_dir, f"batch_audio_chunk_{i}.mp3")
+                    if os.path.exists(audio_file):
+                        audio_files.append(audio_file)
+                logger.debug(f"FALLBACK: Знайдено {len(audio_files)} файлів в batch_merged для {task_key}")
+            
+            if not audio_files:
+                # Якщо в batch_merged нічого немає, шукаємо в temp_chunks
+                for i in range(3):  # Стандартно 3 чанки
+                    audio_file = os.path.join(temp_dir, f"audio_chunk_{i}.mp3")
+                    if os.path.exists(audio_file):
+                        audio_files.append(audio_file)
+                logger.debug(f"FALLBACK: Знайдено {len(audio_files)} файлів в temp_chunks для {task_key}")
                     
             if audio_files:
                 # Знаходимо субтитри

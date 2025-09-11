@@ -107,7 +107,7 @@ class AudioWorkerPool:
             
         # Зупиняємо batch executor якщо існує
         if hasattr(self, 'batch_executor'):
-            self.batch_executor.shutdown(wait=True, timeout=10)
+            self.batch_executor.shutdown(wait=True)
             
         # ФІНАЛЬНА ПЕРЕВІРКА: обробляємо файли, що завершилися після зупинки
         logger.info("Фінальна перевірка залишкових аудіо файлів для транскрипції...")
@@ -268,45 +268,118 @@ class AudioWorkerPool:
         """Групує готові batch частини для транскрипції."""
         try:
             import numpy as np
+            import shutil
             
             # Сортуємо за chunk_index
             completed_items.sort(key=lambda x: x.chunk_index)
             
-            # Розбиваємо на групи за кількістю потоків (max_workers)
+            # Створюємо окрему папку для об'єднаних файлів
+            base_dir = os.path.dirname(completed_items[0].output_path)
+            batch_merged_dir = os.path.join(base_dir, "batch_merged")
+            os.makedirs(batch_merged_dir, exist_ok=True)
+            logger.info(f"Batch: Створено папку для об'єднаних файлів: {batch_merged_dir}")
+            
+            # Створюємо НОВУ логіку групування: [1]+[2]+[3+4] замість [1+2]+[3]+[4]
+            # Це забезпечує більш рівномірний розподіл тривалості
             target_groups = min(self.max_workers, len(completed_items))
-            chunk_groups = np.array_split(completed_items, target_groups)
+            
+            if len(completed_items) == 4 and target_groups == 3:
+                # Спеціальна логіка для 4 файлів → 3 групи: [0], [1], [2+3]
+                chunk_groups = [
+                    [completed_items[0]],  # Перший файл окремо
+                    [completed_items[1]],  # Другий файл окремо  
+                    [completed_items[2], completed_items[3]]  # Останні два файли разом
+                ]
+                logger.info(f"Batch: Спеціальна логіка 4→3: [0], [1], [2+3] для {task_key}")
+            else:
+                # Стандартна логіка для інших випадків
+                chunk_groups = np.array_split(completed_items, target_groups)
+                logger.info(f"Batch: Стандартна логіка для {len(completed_items)} файлів → {target_groups} груп")
             
             logger.info(f"Batch: Створюємо {len(chunk_groups)} груп для транскрипції {task_key}")
+            
+            # Додаткове логування для розуміння логіки
+            for j, grp in enumerate(chunk_groups):
+                indices = [item.chunk_index for item in grp]
+                logger.info(f"Batch: Група {j} містить оригінальні чанки: {indices}")
+            
+            # Оновлюємо self.results для batch_merged файлів
+            if task_key not in self.results:
+                self.results[task_key] = {}
+            
+            # Очищуємо старі результати та створюємо нові для batch_merged
+            old_results = self.results[task_key].copy()
+            self.results[task_key] = {}
+            logger.info(f"Batch: Очищено старі результати {task_key}: {list(old_results.keys())} → нові будуть {list(range(len(chunk_groups)))}")
             
             for i, group in enumerate(chunk_groups):
                 if len(group) == 0:
                     continue
                     
                 if len(group) == 1:
-                    # Одна частина - обробляємо індивідуально
+                    # Одна частина - копіюємо в нову папку з batch_ префіксом
                     item = group[0]
+                    source_path = item.output_path
+                    final_path = os.path.join(batch_merged_dir, f"batch_audio_chunk_{i}.mp3")
+                    
+                    # Видаляємо файл якщо існує
+                    if os.path.exists(final_path):
+                        os.remove(final_path)
+                        logger.debug(f"Batch: Видалено існуючий файл {final_path}")
+                    
+                    # Копіюємо файл
+                    shutil.copy2(source_path, final_path)
+                    logger.debug(f"Batch: Скопійовано одиночний файл → {final_path}")
+                    
+                    # Оновлюємо self.results для batch_merged файлу
+                    self.results[task_key][i] = final_path
+                    logger.debug(f"Batch: Оновлено self.results[{task_key}][{i}] = {final_path}")
+                    
                     self.queue_audio_for_transcription(
-                        audio_path=item.output_path,
-                        output_dir=os.path.dirname(item.output_path),
-                        chunk_index=item.chunk_index,
+                        audio_path=final_path,
+                        output_dir=base_dir,
+                        chunk_index=i,  # Використовуємо послідовний індекс
                         lang_code=item.lang_code,
                         task_key=item.task_key,
                         is_merged_group=False
                     )
-                    logger.info(f"Batch: Додано індивідуальну частину {item.chunk_index} в транскрипцію")
+                    logger.info(f"Batch: Додано індивідуальну частину {i} в транскрипцію")
                 else:
-                    # Кілька частин - об'єднуємо в групу
+                    # Кілька частин - об'єднуємо в групу з batch_ префіксом
                     merged_path = self._merge_audio_files_for_transcription(list(group), f"{task_key}_batch_group_{i}")
                     if merged_path:
+                        # Переміщуємо об'єднаний файл в папку batch_merged з новою назвою
+                        final_path = os.path.join(batch_merged_dir, f"batch_audio_chunk_{i}.mp3")
+                        
+                        # Видаляємо файл якщо існує
+                        if os.path.exists(final_path):
+                            os.remove(final_path)
+                            logger.debug(f"Batch: Видалено існуючий файл {final_path}")
+                        
+                        if os.path.exists(merged_path) and merged_path != final_path:
+                            try:
+                                shutil.move(merged_path, final_path)
+                                logger.debug(f"Batch: Переміщено об'єднаний файл → {final_path}")
+                            except Exception as e:
+                                logger.error(f"Batch: Помилка переміщення {merged_path} → {final_path}: {e}")
+                                # Якщо не вдалося перемістити, використовуємо оригінальний шлях
+                                final_path = merged_path
+                        
+                        # Оновлюємо self.results для batch_merged файлу
+                        self.results[task_key][i] = final_path
+                        logger.debug(f"Batch: Оновлено self.results[{task_key}][{i}] = {final_path}")
+                        
                         self.queue_audio_for_transcription(
-                            audio_path=merged_path,
-                            output_dir=os.path.dirname(group[0].output_path),
-                            chunk_index=group[0].chunk_index,
+                            audio_path=final_path,
+                            output_dir=base_dir,
+                            chunk_index=i,  # Використовуємо послідовний індекс
                             lang_code=group[0].lang_code,
                             task_key=task_key,
                             is_merged_group=True
                         )
-                        logger.info(f"Batch: Додано об'єднану групу {i+1} ({len(group)} частин) в транскрипцію")
+                        logger.info(f"Batch: Додано об'єднану групу {i} ({len(group)} частин) в транскрипцію")
+                        
+            logger.info(f"Batch: ЗАВЕРШЕНО групування для {task_key}. Фінальні результати: {list(self.results[task_key].keys())}")
                         
         except Exception as e:
             logger.exception(f"Batch: Помилка групування для транскрипції {task_key}: {e}")
