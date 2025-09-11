@@ -868,12 +868,13 @@ class TranslationApp:
             return False
         
         if not self.pause_event.is_set():
-            original_text = self.progress_label.cget("text")
-            self.update_progress(self._t('status_paused'))
+            # Автоматично визначаємо тип черги
+            queue_type = 'rewrite' if self.is_processing_rewrite_queue else 'main'
+            self.update_progress(self._t('status_paused'), queue_type=queue_type)
             self.pause_event.wait()
             if self.shutdown_event.is_set(): # Перевіряємо знову після паузи
                 return False
-            self.update_progress(original_text)
+            # Не відновлюємо попередній текст
         return True
             
     def _run_single_chain(self, task_num, total_tasks, original_text, lang_code, lang_steps, lang_output_paths=None):
@@ -1134,16 +1135,21 @@ class TranslationApp:
         """Формує та відправляє фінальний звіт по завершенню всього завдання або однієї мови - delegates to utility function."""
         send_task_completion_report(self, task_config, single_lang_code)
 
-    def update_progress(self, text, increment_step=False):
+    def update_progress(self, text, increment_step=False, queue_type='main'):
         if increment_step:
             self.current_queue_step += 1
         
-        self.root.after(0, lambda: self.progress_label.config(text=text))
-        progress_percent = (self.current_queue_step / self.total_queue_steps) * 100 if self.total_queue_steps > 0 else 0
-        self.root.after(0, lambda: self.progress_var.set(progress_percent))
+        # Оновлюємо тільки прогрес-бар без тексту
+        progress_percent = min(100, (self.current_queue_step / self.total_queue_steps) * 100) if self.total_queue_steps > 0 else 0
+        
+        # Вибираємо правильний прогрес-бар залежно від типу черги
+        if queue_type == 'rewrite':
+            self.root.after(0, lambda: self.rewrite_progress_var.set(progress_percent))
+        else:  # 'main'
+            self.root.after(0, lambda: self.progress_var.set(progress_percent))
     
     def update_progress_for_montage(self, message):
-        self.root.after(0, lambda: self.progress_label.config(text=message))
+        # self.root.after(0, lambda: self.progress_label.config(text=message))
         logger.info(f"[Montage Progress] {message}")
 
 # Test connection methods

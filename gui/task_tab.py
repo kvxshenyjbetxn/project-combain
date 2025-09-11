@@ -171,9 +171,6 @@ def create_task_tab(notebook, app):
     app.progress_var = tk.DoubleVar()
     app.progress_bar = ttk.Progressbar(app.chain_scrollable_frame, variable=app.progress_var, maximum=100, bootstyle="success-striped")
     app.progress_bar.pack(fill='x', padx=10, pady=5)
-    app.progress_label = ttk.Label(app.chain_scrollable_frame, text="")
-    app.progress_label.pack()
-    
     # Створюємо фрейм для кнопок під прогрес-баром
     chain_buttons_frame = ttk.Frame(app.chain_scrollable_frame)
     chain_buttons_frame.pack(pady=5)

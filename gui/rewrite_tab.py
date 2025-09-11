@@ -111,6 +111,11 @@ def create_rewrite_tab(notebook, app):
     buttons_frame.pack(fill='x', padx=10, pady=5)
     ttk.Button(buttons_frame, text=app._t('add_to_queue_button'), command=app.add_to_rewrite_queue, bootstyle="info").pack(side='left', padx=5)
     
+    # Додаємо прогрес-бар для rewrite вкладки
+    app.rewrite_progress_var = tk.DoubleVar()
+    app.rewrite_progress_bar = ttk.Progressbar(app.rewrite_scrollable_frame, variable=app.rewrite_progress_var, maximum=100, bootstyle="success-striped")
+    app.rewrite_progress_bar.pack(fill='x', padx=10, pady=5)
+    
     # Створюємо фрейм для кнопок
     rewrite_buttons_frame = ttk.Frame(app.rewrite_scrollable_frame)
     rewrite_buttons_frame.pack(pady=5)

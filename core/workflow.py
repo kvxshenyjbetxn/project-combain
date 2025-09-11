@@ -68,6 +68,29 @@ class WorkflowManager:
             self.app.root.after(100, self.app._process_command_queue)
 
         self.app._update_button_states(is_processing=True, is_image_stuck=False)
+        
+        # Підрахунок загальної кількості кроків для прогрес-бару
+        self.app.current_queue_step = 0
+        
+        # Скидаємо правильний прогрес-бар залежно від типу черги
+        if is_rewrite:
+            self.app.rewrite_progress_var.set(0)
+        else:
+            self.app.progress_var.set(0)
+            
+        total_steps = 0
+        
+        # Основні фази обробки
+        if is_rewrite:
+            total_steps += 1  # Phase 0: Transcription
+        total_steps += 1  # Phase 1: Text processing
+        total_steps += 1  # Phase 2: Media generation
+        if self.config.get("ui_settings", {}).get("image_control_enabled", False):
+            total_steps += 1  # Phase 3: Image control
+        total_steps += 1  # Phase 4: Final montage
+        
+        self.app.total_queue_steps = total_steps
+        logger.info(f"Запланованих кроків для прогрес-бару: {total_steps}")
 
         try:
             queue_to_process = list(queue_to_process_list)
@@ -95,7 +118,7 @@ class WorkflowManager:
 
             # Phase 0: Transcription (only for rewrite mode)
             if is_rewrite:
-                self.app.update_progress(self.app._t('phase_0_transcription'))
+                self.app.update_progress(self.app._t('phase_0_transcription'), increment_step=True, queue_type=queue_type)
                 logger.info("Hybrid mode -> Phase 0: Sequential transcription of local files.")
                 
                 transcribed_texts = {}
@@ -142,7 +165,7 @@ class WorkflowManager:
 
 
             # Phase 1: Parallel text processing
-            self.app.update_progress(self.app._t('phase_1_text_processing'))
+            self.app.update_progress(self.app._t('phase_1_text_processing'), increment_step=True, queue_type=queue_type)
             logger.info(f"Hybrid mode -> Phase 1: Parallel text processing for {len(queue_to_process)} tasks.")
             
             with concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
@@ -189,7 +212,7 @@ class WorkflowManager:
 
 
             # --- ЕТАП 2: ОДНОЧАСНА ГЕНЕРАЦІЯ МЕДІА ---
-            self.app.update_progress(self.app._t('phase_2_media_generation'))
+            self.app.update_progress(self.app._t('phase_2_media_generation'), increment_step=True, queue_type=queue_type)
             logger.info("Гібридний режим -> Етап 2: Одночасна генерація медіа.")
             
             self.app.root.after(0, self.app.setup_empty_gallery, queue_type, queue_to_process)
@@ -200,13 +223,13 @@ class WorkflowManager:
             )
 
             if should_gen_images:
-                image_master_thread = threading.Thread(target=self._sequential_image_master, args=(processing_data, queue_to_process))
+                image_master_thread = threading.Thread(target=self._sequential_image_master, args=(processing_data, queue_to_process, queue_type))
                 image_master_thread.start()
             else:
                 image_master_thread = None
                 logger.info("Hybrid mode -> Image generation disabled for all tasks. Skipping.")
 
-            audio_subs_master_thread = threading.Thread(target=self._audio_subs_pipeline_master, args=(processing_data, is_rewrite))
+            audio_subs_master_thread = threading.Thread(target=self._audio_subs_pipeline_master, args=(processing_data, is_rewrite, queue_type))
             audio_subs_master_thread.start()
             
             if image_master_thread:
@@ -217,7 +240,7 @@ class WorkflowManager:
             
             # --- ЕТАП 3: ОПЦІОНАЛЬНА ПАУЗА ---
             if self.config.get("ui_settings", {}).get("image_control_enabled", False) and should_gen_images:
-                self.app.update_progress(self.app._t('phase_3_image_control'))
+                self.app.update_progress(self.app._t('phase_3_image_control'), increment_step=True, queue_type=queue_type)
                 logger.info("Гібридний режим -> Етап 3: Пауза для налаштування зображень користувачем.")
                 
                 # Відправляємо статус готовності до монтажу в Firebase
@@ -236,7 +259,7 @@ class WorkflowManager:
                 logger.info("Гібридний режим -> Етап 3: Пауза вимкнена або не потрібна, перехід до монтажу.")
 
             # Phase 4: Final montage and language reports
-            self.app.update_progress(self.app._t('phase_4_final_montage'))
+            self.app.update_progress(self.app._t('phase_4_final_montage'), increment_step=True, queue_type=queue_type)
             logger.info("Hybrid mode -> Phase 4: Starting final montage and language reports.")
 
             for task_key, data in sorted(processing_data.items()):
@@ -335,7 +358,11 @@ class WorkflowManager:
                 for task_config in queue_to_process:
                     self.app.send_task_completion_report(task_config)
             
-            self.app.root.after(0, lambda: self.app.progress_label.config(text=self.app._t('status_complete')))
+            # Встановлюємо прогрес-бар на 100% після завершення
+            if is_rewrite:
+                self.app.root.after(0, lambda: self.app.rewrite_progress_var.set(100))
+            else:
+                self.app.root.after(0, lambda: self.app.progress_var.set(100))
             self.app.root.after(0, lambda: messagebox.showinfo(self.app._t('queue_title'), self.app._t('info_queue_complete')))
 
         except Exception as e:
@@ -518,7 +545,7 @@ class WorkflowManager:
             logger.exception(f"Error in rewrite text processing worker for {lang_code}: {e}")
             return None
 
-    def _sequential_image_master(self, processing_data, queue_to_process):
+    def _sequential_image_master(self, processing_data, queue_to_process, queue_type):
         """Головний потік, що керує послідовною генерацією всіх зображень."""
         logger.info("[Image Control] Image Master Thread: Starting sequential image generation.")
         for task_key, data in sorted(processing_data.items()):
@@ -527,7 +554,7 @@ class WorkflowManager:
             step_name = self.app._t('step_name_gen_images')
 
             if data.get('text_results') and data['task']['steps'][lang_code].get('gen_images'):
-                success = self._image_generation_worker(data, task_key, task_idx_str + 1, len(queue_to_process))
+                success = self._image_generation_worker(data, task_key, task_idx_str + 1, len(queue_to_process), queue_type)
                 if status_key in self.app.task_completion_status:
                     # Тепер ми перевіряємо, чи були згенеровані якісь зображення
                     if self.app.task_completion_status[status_key]["images_generated"] > 0:
@@ -541,7 +568,7 @@ class WorkflowManager:
 
         logger.info("[Image Control] Image Master Thread: All image generation tasks complete.")
 
-    def _image_generation_worker(self, data, task_key, task_num, total_tasks):
+    def _image_generation_worker(self, data, task_key, task_num, total_tasks, queue_type):
         prompts = data['text_results']['prompts']
         images_folder = data['text_results']['images_folder']
         lang_name = task_key[1].upper()
@@ -569,7 +596,7 @@ class WorkflowManager:
                 current_api_for_generation = self.app.active_image_api
 
             progress_text = f"Завд.{task_num}/{total_tasks} | {lang_name} - [{current_api_for_generation.capitalize()}] {self.app._t('step_gen_images')} {i+1}/{len(prompts)}..."
-            self.app.update_progress(progress_text)
+            self.app.update_progress(progress_text, queue_type=queue_type)
 
             image_path = os.path.join(images_folder, f"image_{i+1:03d}.jpg")
 
@@ -681,7 +708,7 @@ class WorkflowManager:
 
         return all_successful
 
-    def _audio_subs_pipeline_master(self, processing_data, is_rewrite=False):
+    def _audio_subs_pipeline_master(self, processing_data, is_rewrite=False, queue_type='main'):
         """Керує пайплайном Аудіо -> Транскрипція з централізованою логікою."""
         logger.info("[Audio/Subs Master] Запуск керованого пайплайну.")
         
@@ -751,7 +778,7 @@ class WorkflowManager:
                     task_info = tasks_info[task_key]
                     task_info['completed_audio_items'].append(result.item)
 
-                    self.app.update_progress(f"Озвучка: {completed_audio_count}/{total_audio_chunks_expected}")
+                    self.app.update_progress(f"Озвучка: {completed_audio_count}/{total_audio_chunks_expected}", queue_type=queue_type)
 
                     if task_info['tts_service'] != 'voicemaker':
                         # Всі інші сервіси відправляємо на транскрипцію відразу
@@ -832,7 +859,7 @@ class WorkflowManager:
                         info['data']['audio_chunks'].append(result_item.audio_path)
                     
                     completed_transcriptions += 1
-                    self.app.update_progress(f"Транскрипція: {completed_transcriptions}/{total_transcriptions_expected}")
+                    self.app.update_progress(f"Транскрипція: {completed_transcriptions}/{total_transcriptions_expected}", queue_type=queue_type)
 
                 except queue.Empty:
                     continue
