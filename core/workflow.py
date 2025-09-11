@@ -12,6 +12,7 @@ from tkinter import messagebox
 # Імпортуємо необхідні утиліти та функції
 from utils.file_utils import sanitize_filename, chunk_text, chunk_text_voicemaker, chunk_text_speechify
 from utils.media_utils import concatenate_audio_files, concatenate_videos
+from core.audio_pipeline import AudioWorkerPool, AudioPipelineItem
 
 logger = logging.getLogger("TranslationApp")
 
@@ -33,8 +34,13 @@ class WorkflowManager:
         self.montage_api = app_instance.montage_api
         self.tg_api = app_instance.tg_api
         self.firebase_api = app_instance.firebase_api
-
-    # Тут будуть знаходитись методи для обробки завдань
+        
+    def shutdown(self):
+        """Зупиняє всі активні процеси WorkflowManager."""
+        if hasattr(self, 'audio_worker_pool') and self.audio_worker_pool:
+            logger.info("Зупинка аудіо воркер пулу...")
+            self.audio_worker_pool.stop()
+            self.audio_worker_pool = None
 
     def _process_hybrid_queue(self, queue_to_process_list, queue_type):
         is_rewrite = queue_type == 'rewrite'
@@ -198,7 +204,7 @@ class WorkflowManager:
                 image_master_thread = None
                 logger.info("Hybrid mode -> Image generation disabled for all tasks. Skipping.")
 
-            audio_subs_master_thread = threading.Thread(target=self._audio_subs_pipeline_master, args=(processing_data,))
+            audio_subs_master_thread = threading.Thread(target=self._audio_subs_pipeline_master, args=(processing_data, is_rewrite))
             audio_subs_master_thread.start()
             
             if image_master_thread:
@@ -658,32 +664,45 @@ class WorkflowManager:
 
         return all_successful
 
-    def _audio_subs_pipeline_master(self, processing_data):
-        """Керує послідовним конвеєром Аудіо -> Субтитри для кожної мови."""
-        logger.info("[Audio/Subs Master] Starting pipeline.")
+    def _audio_subs_pipeline_master(self, processing_data, is_rewrite=False):
+        """Керує новим пайплайном Аудіо -> Транскрипція з використанням воркер пулу."""
+        logger.info(f"[Audio/Subs Master] Запуск нового пайплайну з воркер пулом. Режим: {'рерайт' if is_rewrite else 'переклад'}")
+        
         num_parallel_chunks = self.config.get('parallel_processing', {}).get('num_chunks', 3)
-
-        for task_key, data in sorted(processing_data.items()):
-            if not data.get('text_results'): continue
+        
+        # Ініціалізуємо та запускаємо аудіо воркер пул
+        self.audio_worker_pool = AudioWorkerPool(self.app, num_parallel_chunks)
+        self.audio_worker_pool.start()
+        
+        try:
+            # Підготовка всіх аудіо завдань
+            audio_tasks = []
+            task_chunks_info = {}  # task_key -> {lang_code, total_chunks, temp_dir, etc.}
             
-            task_idx_str, lang_code = task_key
-            status_key = f"{task_idx_str}_{lang_code}"
-            lang_steps = data['task']['steps'][lang_code]
-            lang_config = self.config["languages"][lang_code]
-            tts_service = lang_config.get("tts_service", "elevenlabs")
-            text_to_process = data['text_results']['text_to_process']
-            output_path = data['text_results']['output_path']
-            
-            temp_dir = os.path.join(output_path, "temp_chunks")
-            os.makedirs(temp_dir, exist_ok=True)
-            data['temp_dir'] = temp_dir
-            
-            final_audio_chunks = []
-
-            audio_step_name = self.app._t('step_name_audio')
-            if lang_steps.get('audio'):
+            for task_key, data in sorted(processing_data.items()):
+                if not data.get('text_results'): 
+                    continue
+                
+                task_idx_str, lang_code = task_key
+                status_key = f"{task_idx_str}_{lang_code}"
+                lang_steps = data['task']['steps'][lang_code]
+                lang_config = self.config["languages"][lang_code]
+                tts_service = lang_config.get("tts_service", "elevenlabs")
+                text_to_process = data['text_results']['text_to_process']
+                output_path = data['text_results']['output_path']
+                
+                temp_dir = os.path.join(output_path, "temp_chunks")
+                os.makedirs(temp_dir, exist_ok=True)
+                data['temp_dir'] = temp_dir
+                
+                if not lang_steps.get('audio'):
+                    logger.info(f"Аудіо етап вимкнено для {lang_code}. Пропускаємо.")
+                    continue
+                
+                # Розбиття тексту на фрагменти
                 voicemaker_limit = self.config.get("voicemaker", {}).get("char_limit", 9900)
                 text_chunks = []
+                
                 if tts_service == "voicemaker" and len(text_to_process) > voicemaker_limit:
                     text_chunks = chunk_text_voicemaker(text_to_process, voicemaker_limit)
                 elif tts_service == "speechify" and len(text_to_process) > 16000:
@@ -692,159 +711,155 @@ class WorkflowManager:
                     text_chunks = chunk_text(text_to_process, num_parallel_chunks)
                 
                 if not text_chunks:
-                    logger.error(f"Text for {lang_code} is empty after chunking. Skipping.")
-                    if status_key in self.app.task_completion_status and audio_step_name in self.app.task_completion_status[status_key]['steps']:
-                        self.app.task_completion_status[status_key]['steps'][audio_step_name] = "❌"
+                    logger.error(f"Текст для {lang_code} порожній після розбиття. Пропускаємо.")
                     continue
-
-                self.app.update_progress(f"{lang_code.upper()}: Генерація {len(text_chunks)} аудіо-шматків...")
-                initial_audio_chunks = []
-                with concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-                    future_to_chunk = {}
-                    for i, chunk in enumerate(text_chunks):
-                        future = executor.submit(self._audio_generation_worker, chunk, os.path.join(temp_dir, f"audio_chunk_{i}.mp3"), lang_config, lang_code, i + 1, len(text_chunks))
-                        future_to_chunk[future] = i
-                        time.sleep(1)
+                
+                # Зберігаємо інформацію про завдання
+                task_chunks_info[str(task_key)] = {
+                    'lang_code': lang_code,
+                    'total_chunks': len(text_chunks),
+                    'temp_dir': temp_dir,
+                    'tts_service': tts_service,
+                    'status_key': status_key,
+                    'lang_steps': lang_steps,
+                    'data': data
+                }
+                
+                # Створюємо аудіо завдання для воркер пулу
+                for i, chunk in enumerate(text_chunks):
+                    audio_task = AudioPipelineItem(
+                        text_chunk=chunk,
+                        output_path=os.path.join(temp_dir, f"audio_chunk_{i}.mp3"),
+                        lang_config=lang_config,
+                        lang_code=lang_code,
+                        chunk_index=i,
+                        total_chunks=len(text_chunks),
+                        task_key=str(task_key)
+                    )
+                    audio_tasks.append(audio_task)
+                
+                self.app.update_progress(f"{lang_code.upper()}: Додано {len(text_chunks)} аудіо завдань до черги...")
+            
+            # Додаємо всі аудіо завдання до воркер пулу
+            for task in audio_tasks:
+                self.audio_worker_pool.add_audio_task(task)
+            
+            logger.info(f"Додано {len(audio_tasks)} аудіо завдань до воркер пулу")
+            
+            # Моніторинг завершення завдань та гібридна обробка
+            completed_tasks = set()
+            total_tasks = len(task_chunks_info)
+            last_check_time = time.time()
+            
+            while len(completed_tasks) < total_tasks and not self.app.shutdown_event.is_set():
+                current_time = time.time()
+                
+                # Періодично запускаємо обробку готових груп для транскрипції
+                if current_time - last_check_time >= 2.0:  # Кожні 2 секунди
+                    # Визначаємо TTS сервіс для обробки груп
+                    current_tts_service = self._get_current_tts_service(task_chunks_info)
+                    if current_tts_service:
+                        self.audio_worker_pool.process_ready_groups_for_transcription(current_tts_service)
+                    last_check_time = current_time
+                
+                for task_key, info in task_chunks_info.items():
+                    if task_key in completed_tasks:
+                        continue
                     
-                    results = [None] * len(text_chunks)
-                    for future in concurrent.futures.as_completed(future_to_chunk):
-                        results[future_to_chunk[future]] = future.result()
-                initial_audio_chunks = [r for r in results if r]
-
-                if len(initial_audio_chunks) != len(text_chunks):
-                     logger.error(f"Failed to generate all audio chunks for {lang_code}. Skipping subs/video.")
-                     if status_key in self.app.task_completion_status and audio_step_name in self.app.task_completion_status[status_key]['steps']:
-                        self.app.task_completion_status[status_key]['steps'][audio_step_name] = "❌"
-                     continue
-
-                if (tts_service in ["voicemaker", "speechify"]) and len(initial_audio_chunks) > num_parallel_chunks:
-                    logger.info(f"Merging {len(initial_audio_chunks)} {tts_service} audio chunks into {num_parallel_chunks} final chunks.")
-                    chunk_groups = np.array_split(initial_audio_chunks, num_parallel_chunks)
+                    # Перевіряємо чи завершено повністю (аудіо + транскрипція)
+                    if self.audio_worker_pool.is_task_completed(task_key):
+                        completed_tasks.add(task_key)
+                        lang_code = info['lang_code']
+                        status_key = info['status_key']
+                        
+                        # Отримуємо готові файли
+                        audio_files = self.audio_worker_pool.get_completed_audio_for_task(task_key)
+                        if audio_files:
+                            # Обробка готових аудіо файлів (об'єднання якщо потрібно)
+                            final_audio_chunks = self._process_completed_audio_chunks(
+                                audio_files, info['tts_service'], info['temp_dir'], 
+                                lang_code, num_parallel_chunks
+                            )
+                            
+                            if final_audio_chunks:
+                                info['data']['audio_chunks'] = sorted(final_audio_chunks)
+                                
+                                # Знаходимо відповідні субтитри
+                                subs_dir = os.path.join(info['temp_dir'], "subs")
+                                subs_files = sorted([
+                                    os.path.join(subs_dir, f"subs_chunk_{i}.ass") 
+                                    for i in range(len(final_audio_chunks))
+                                    if os.path.exists(os.path.join(subs_dir, f"subs_chunk_{i}.ass"))
+                                ])
+                                
+                                info['data']['subs_chunks'] = subs_files
+                                
+                                # Оновлюємо статус
+                                if status_key in self.app.task_completion_status:
+                                    audio_step_name = self.app._t('step_name_audio')
+                                    subs_step_name = self.app._t('step_name_create_subtitles')
+                                    
+                                    if audio_step_name in self.app.task_completion_status[status_key]['steps']:
+                                        self.app.task_completion_status[status_key]['steps'][audio_step_name] = "✅"
+                                    
+                                    if subs_step_name in self.app.task_completion_status[status_key]['steps']:
+                                        if len(subs_files) == len(final_audio_chunks):
+                                            self.app.task_completion_status[status_key]['steps'][subs_step_name] = "✅"
+                                        else:
+                                            self.app.task_completion_status[status_key]['steps'][subs_step_name] = "❌"
+                                
+                                logger.info(f"Завершено обробку аудіо та субтитрів для {lang_code}")
+                            else:
+                                logger.error(f"Помилка обробки аудіо файлів для {lang_code}")
+                        
+                        self.app.update_progress(f"Завершено: {len(completed_tasks)}/{total_tasks} завдань")
+                
+                # Перевіряємо shutdown_event частіше
+                if self.app.shutdown_event.is_set():
+                    logger.info("Отримано сигнал зупинки, переривання аудіо пайплайну...")
+                    break
                     
-                    for i, group in enumerate(chunk_groups):
-                        if not group.any(): continue
+                time.sleep(0.5)  # Коротка пауза перед наступною перевіркою
+            
+        finally:
+            # Зупиняємо воркер пул
+            if self.audio_worker_pool:
+                self.audio_worker_pool.stop()
+                self.audio_worker_pool = None
+        
+        logger.info("[Audio/Subs Master] Новий пайплайн завершено.")
+    
+    def _process_completed_audio_chunks(self, audio_files: list, tts_service: str, temp_dir: str, 
+                                      lang_code: str, num_parallel_chunks: int) -> list:
+        """Обробляє готові аудіо файли (об'єднання якщо потрібно)."""
+        try:
+            # Для voicemaker та speechify можливо потрібне об'єднання
+            if (tts_service in ["voicemaker", "speechify"]) and len(audio_files) > num_parallel_chunks:
+                logger.info(f"Об'єднання {len(audio_files)} {tts_service} аудіо файлів в {num_parallel_chunks} фінальних частин.")
+                
+                chunk_groups = np.array_split(audio_files, num_parallel_chunks)
+                final_audio_chunks = []
+                
+                for i, group in enumerate(chunk_groups):
+                    if len(group) == 0: 
+                        continue
+                    if len(group) == 1:
+                        final_audio_chunks.append(group[0])
+                    else:
                         merged_output_file = os.path.join(temp_dir, f"merged_chunk_{lang_code}_{i}.mp3")
                         if concatenate_audio_files(list(group), merged_output_file):
                             final_audio_chunks.append(merged_output_file)
                         else:
-                             logger.error(f"Failed to merge a group of {tts_service} audio files for {lang_code}.")
-                else:
-                    final_audio_chunks = initial_audio_chunks
+                            logger.error(f"Помилка об'єднання групи {tts_service} аудіо файлів для {lang_code}.")
+                            return None
                 
-                if final_audio_chunks:
-                     if status_key in self.app.task_completion_status and audio_step_name in self.app.task_completion_status[status_key]['steps']:
-                        self.app.task_completion_status[status_key]['steps'][audio_step_name] = "✅"
-                else:
-                    logger.error(f"Audio processing resulted in zero final chunks for {lang_code}.")
-                    if status_key in self.app.task_completion_status and audio_step_name in self.app.task_completion_status[status_key]['steps']:
-                        self.app.task_completion_status[status_key]['steps'][audio_step_name] = "❌"
+                return final_audio_chunks
             else:
-                logger.info(f"Audio step disabled for {lang_code}. Searching for existing merged audio chunks...")
-                found_chunks = sorted([os.path.join(temp_dir, f) for f in os.listdir(temp_dir) if f.startswith(f'merged_chunk_{lang_code}_') and f.endswith('.mp3')])
-                if found_chunks:
-                    logger.info(f"Found {len(found_chunks)} existing merged audio chunks.")
-                    final_audio_chunks = found_chunks
-                else:
-                    logger.warning(f"No merged audio chunks found for {lang_code}. Dependent steps will be skipped.")
-            
-            if not final_audio_chunks:
-                continue
-
-            data['audio_chunks'] = sorted(final_audio_chunks)
-            subs_chunk_dir = os.path.join(temp_dir, "subs"); os.makedirs(subs_chunk_dir, exist_ok=True)
-            subs_chunk_paths = []
-            
-            subs_step_name = self.app._t('step_name_create_subtitles')
-            if lang_steps.get('create_subtitles'):
-                self.app.update_progress(f"{lang_code.upper()}: Генерація субтитрів...")
-                subs_chunk_paths = self._sequential_subtitle_worker(data['audio_chunks'], subs_chunk_dir)
+                return sorted(audio_files)
                 
-                if len(subs_chunk_paths) == len(data['audio_chunks']):
-                    if status_key in self.app.task_completion_status and subs_step_name in self.app.task_completion_status[status_key]['steps']:
-                        self.app.task_completion_status[status_key]['steps'][subs_step_name] = "✅"
-                else:
-                    logger.error(f"Failed to generate all subtitle chunks for {lang_code}.")
-                    if status_key in self.app.task_completion_status and subs_step_name in self.app.task_completion_status[status_key]['steps']:
-                        self.app.task_completion_status[status_key]['steps'][subs_step_name] = "❌"
-                    continue
-            else:
-                logger.info(f"Subtitles step disabled for {lang_code}. Searching for existing subtitle chunks...")
-                found_subs = sorted([os.path.join(subs_chunk_dir, f) for f in os.listdir(subs_chunk_dir) if f.startswith('subs_chunk_') and f.endswith('.ass')])
-                if len(found_subs) == len(data['audio_chunks']):
-                     logger.info(f"Found {len(found_subs)} existing subtitle chunks.")
-                     subs_chunk_paths = found_subs
-                else:
-                    logger.warning(f"Found {len(found_subs)} subtitle chunks, but expected {len(data['audio_chunks'])}. Video montage might fail.")
-                    subs_chunk_paths = found_subs 
-
-            data['subs_chunks'] = sorted(subs_chunk_paths)
-
-        logger.info("[Audio/Subs Master] Pipeline finished.")
-
-    def _audio_generation_worker(self, text_chunk, output_path, lang_config, lang_code, chunk_index, total_chunks):
-        if hasattr(self.app, 'log_context'):
-            self.app.log_context.parallel_task = 'Audio Gen'
-            self.app.log_context.worker_id = f'Chunk {chunk_index}/{total_chunks}'
-        try:
-            tts_service = lang_config.get("tts_service", "elevenlabs")
-            logger.info(f"Starting audio generation task with {tts_service}")
-            
-            if tts_service == "elevenlabs":
-                task_id = self.el_api.create_audio_task(text_chunk, lang_config.get("elevenlabs_template_uuid"))
-                new_balance = self.el_api.balance
-                if new_balance is not None:
-                    self.app._update_elevenlabs_balance_labels(new_balance)
-                if task_id and task_id != "INSUFFICIENT_BALANCE":
-                    if self.el_api.wait_for_elevenlabs_task(self.app, task_id, output_path):
-                        return output_path
-            
-            elif tts_service == "voicemaker":
-                voice_id = lang_config.get("voicemaker_voice_id")
-                engine = lang_config.get("voicemaker_engine")
-                success, new_balance = self.vm_api.generate_audio(text_chunk, voice_id, engine, lang_code, output_path)
-                if success:
-                    if new_balance is not None:
-                        vm_text = new_balance if new_balance is not None else 'N/A'
-                        self.app.root.after(0, lambda: self.app.settings_vm_balance_label.config(text=f"{self.app._t('balance_label')}: {vm_text}"))
-                        self.app.root.after(0, lambda: self.app.chain_vm_balance_label.config(text=f"{self.app._t('voicemaker_balance_label')}: {vm_text}"))
-                        self.app.root.after(0, lambda: self.app.rewrite_vm_balance_label.config(text=f"{self.app._t('voicemaker_balance_label')}: {vm_text}"))
-                    return output_path
-            
-            elif tts_service == "speechify":
-                logger.info("[Chain] Using Speechify for TTS.")
-                success, _ = self.speechify_api.generate_audio_streaming(
-                    text=text_chunk,
-                    voice_id=lang_config.get("speechify_voice_id"),
-                    model=lang_config.get("speechify_model"),
-                    output_path=output_path,
-                    emotion=lang_config.get("speechify_emotion"),
-                    pitch=lang_config.get("speechify_pitch", 0),
-                    rate=lang_config.get("speechify_rate", 0)
-                )
-                if success:
-                    return output_path
-
-            logger.error(f"Failed to generate audio chunk using {tts_service}")
+        except Exception as e:
+            logger.exception(f"Помилка обробки аудіо файлів: {e}")
             return None
-        finally:
-            if hasattr(self.app, 'log_context'):
-                if hasattr(self.app.log_context, 'parallel_task'): del self.app.log_context.parallel_task
-                if hasattr(self.app.log_context, 'worker_id'): del self.app.log_context.worker_id
-
-    def _sequential_subtitle_worker(self, audio_chunk_paths: list, subs_chunk_dir: str) -> list:
-        logger.info(f"Starting sequential subtitle generation for {len(audio_chunk_paths)} audio chunks.")
-        subs_chunk_paths = []
-        total_chunks = len(audio_chunk_paths)
-        for i, audio_path in enumerate(audio_chunk_paths):
-            self.app.update_progress(self.app._t('transcribing_chunk', current=i + 1, total=total_chunks))
-            subs_path = os.path.join(subs_chunk_dir, f"subs_chunk_{i}.ass")
-            if self.montage_api.create_subtitles(audio_path, subs_path):
-                subs_chunk_paths.append(subs_path)
-            else:
-                logger.error(f"Failed to generate subtitle chunk for {audio_path}.")
-        
-        logger.info(f"Finished subtitle generation. Successfully created {len(subs_chunk_paths)} subtitle files.")
-        return sorted(subs_chunk_paths)
 
     def _concatenate_videos(self, app_instance, video_chunks, output_path):
         """Об'єднання відеофрагментів."""
@@ -900,3 +915,15 @@ class WorkflowManager:
                 # Результат (шлях до аудіо) записується в загальний словник
                 processing_data[task_key]['audio_path'] = future.result()
         logger.info("[Image Control] Audio Master Thread: All audio generation tasks complete.")
+
+    def _get_current_tts_service(self, task_chunks_info: dict) -> str:
+        """Визначає поточний TTS сервіс для обробки груп."""
+        if not task_chunks_info:
+            return "elevenlabs"  # За замовчуванням
+        
+        # Беремо перший доступний TTS сервіс з завдань
+        for info in task_chunks_info.values():
+            if 'tts_service' in info:
+                return info['tts_service']
+        
+        return "elevenlabs"  # За замовчуванням

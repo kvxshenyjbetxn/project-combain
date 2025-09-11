@@ -448,6 +448,10 @@ class TranslationApp:
         self.shutdown_event.set() 
         logger.info("Application shutdown: saving UI settings...")
 
+        # Зупиняємо аудіо воркер пул
+        if hasattr(self, 'workflow_manager') and self.workflow_manager:
+            self.workflow_manager.shutdown()
+
         if "ui_settings" not in self.config:
             self.config["ui_settings"] = {}
         
@@ -1985,7 +1989,45 @@ class TranslationApp:
         if folder:
             self.output_rewrite_default_dir_var.set(folder)
 
+    def _generate_single_audio_chunk(self, text_chunk, output_path, lang_config, lang_code):
+        """Простий метод для генерації одного аудіо фрагменту."""
+        tts_service = lang_config.get("tts_service", "elevenlabs")
+        
+        try:
+            if tts_service == "elevenlabs":
+                task_id = self.el_api.create_audio_task(text_chunk, lang_config.get("elevenlabs_template_uuid"))
+                if task_id and task_id != "INSUFFICIENT_BALANCE":
+                    return self.el_api.wait_for_elevenlabs_task(self, task_id, output_path)
+                    
+            elif tts_service == "voicemaker":
+                voice_id = lang_config.get("voicemaker_voice_id")
+                engine = lang_config.get("voicemaker_engine")
+                success, _ = self.vm_api.generate_audio(text_chunk, voice_id, engine, lang_code, output_path)
+                return success
+                
+            elif tts_service == "speechify":
+                success, _ = self.speechify_api.generate_audio_streaming(
+                    text=text_chunk,
+                    voice_id=lang_config.get("speechify_voice_id"),
+                    model=lang_config.get("speechify_model"),
+                    output_path=output_path,
+                    emotion=lang_config.get("speechify_emotion"),
+                    pitch=lang_config.get("speechify_pitch", 0),
+                    rate=lang_config.get("speechify_rate", 0)
+                )
+                return success
+                
+            return False
+        except Exception as e:
+            logger.exception(f"Помилка генерації аудіо фрагменту: {e}")
+            return False
+
     def _prepare_parallel_audio_chunks(self, text_to_process, lang_config, lang_code, temp_dir, num_parallel_chunks):
+        """
+        ЗАСТАРІЛИЙ МЕТОД: Цей метод використовується для старої логіки аудіо обробки.
+        Новий метод знаходиться в core.audio_pipeline.AudioWorkerPool.
+        Залишений для сумісності зі старими частинами коду.
+        """
         tts_service = lang_config.get("tts_service", "elevenlabs")
         temp_audio_dir = os.path.join(temp_dir, "audio_chunks")
         os.makedirs(temp_audio_dir, exist_ok=True)
@@ -2006,17 +2048,13 @@ class TranslationApp:
 
         # Генерація аудіо для отриманих частин
         audio_chunks_paths = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(text_chunks)) as executor:
-            future_to_index = {
-                executor.submit(self.workflow_manager._audio_generation_worker, chunk, os.path.join(temp_audio_dir, f"chunk_{i}.mp3"), lang_config, lang_code, i + 1, len(text_chunks)): i
-                for i, chunk in enumerate(text_chunks)
-            }
-            results = [None] * len(text_chunks)
-            for future in concurrent.futures.as_completed(future_to_index):
-                index = future_to_index[future]
-                results[index] = future.result()
         
-        audio_chunks_paths = [r for r in results if r]
+        # Заглушка: використовуємо простий спосіб без воркер пулу для старої логіки
+        for i, chunk in enumerate(text_chunks):
+            output_path = os.path.join(temp_audio_dir, f"chunk_{i}.mp3")
+            success = self._generate_single_audio_chunk(chunk, output_path, lang_config, lang_code)
+            if success:
+                audio_chunks_paths.append(output_path)
         
         if len(audio_chunks_paths) != len(text_chunks):
             logger.error(f"Failed to generate all audio chunks for {tts_service}.")
