@@ -78,6 +78,8 @@ from utils import (
     suppress_stdout_stderr
 )
 
+from utils.settings_utils import save_settings as save_settings_util
+
 from utils.media_utils import concatenate_videos, video_chunk_worker
 
 # Configure logging
@@ -1283,130 +1285,8 @@ class TranslationApp:
                 self.recraft_substyle_var.set("")
 
     def save_settings(self):
-        if 'parallel_processing' not in self.config: self.config['parallel_processing'] = {}
-        self.config['parallel_processing']['enabled'] = self.parallel_enabled_var.get()
-        self.config['parallel_processing']['num_chunks'] = self.parallel_num_chunks_var.get()
-        self.config['parallel_processing']['keep_temp_files'] = self.parallel_keep_temps_var.get()
-        self.config["openrouter"]["api_key"] = self.or_api_key_var.get()
-        self.config["openrouter"]["translation_model"] = self.or_trans_model_var.get()
-        self.config["openrouter"]["prompt_model"] = self.or_prompt_model_var.get()
-        self.config["openrouter"]["cta_model"] = self.or_cta_model_var.get()
-        self.config["openrouter"]["rewrite_model"] = self.or_rewrite_model_var.get()
-        self.config["openrouter"]["saved_models"] = list(self.or_models_listbox.get(0, tk.END))
-        self.config["openrouter"]["translation_params"]["temperature"] = self.trans_temp_var.get()
-        self.config["openrouter"]["translation_params"]["max_tokens"] = self.trans_tokens_var.get()
-        self.config["openrouter"]["rewrite_params"]["temperature"] = self.rewrite_temp_var.get()
-        self.config["openrouter"]["rewrite_params"]["max_tokens"] = self.rewrite_tokens_var.get()
-        self.config["openrouter"]["prompt_params"]["temperature"] = self.prompt_gen_temp_var.get()
-        self.config["openrouter"]["prompt_params"]["max_tokens"] = self.prompt_gen_tokens_var.get()
-        self.config["openrouter"]["cta_params"]["temperature"] = self.cta_temp_var.get()
-        self.config["openrouter"]["cta_params"]["max_tokens"] = self.cta_tokens_var.get()
-        self.config["default_prompts"]["image_prompt_generation"] = self.prompt_gen_prompt_text.get("1.0", tk.END).strip()
-        self.config["default_prompts"]["call_to_action"] = self.cta_prompt_text.get("1.0", tk.END).strip()
-        self.config["pollinations"]["token"] = self.poll_token_var.get()
-        self.config["pollinations"]["model"] = self.poll_model_var.get()
-        self.config["pollinations"]["width"] = self.poll_width_var.get()
-        self.config["pollinations"]["height"] = self.poll_height_var.get()
-        self.config["pollinations"]["timeout"] = self.poll_timeout_var.get()
-        self.config['ui_settings']['image_generation_api'] = self.active_image_api_var.get()
-        self.config["pollinations"]["remove_logo"] = self.poll_remove_logo_var.get()
-        if 'recraft' not in self.config: self.config['recraft'] = {}
-        self.config['recraft']['api_key'] = self.recraft_api_key_var.get()
-        self.config['recraft']['model'] = self.recraft_model_var.get()
-        self.config['recraft']['style'] = self.recraft_style_var.get()
-        self.config['recraft']['substyle'] = self.recraft_substyle_var.get()
-        self.config['recraft']['size'] = self.recraft_size_var.get().split(' ')[0]
-        self.config['recraft']['negative_prompt'] = self.recraft_negative_prompt_var.get()
-        self.config["elevenlabs"]["api_key"] = self.el_api_key_var.get()
-        if 'voicemaker' not in self.config: self.config['voicemaker'] = {}
-        self.config['voicemaker']['api_key'] = self.vm_api_key_var.get()
-        self.config['voicemaker']['char_limit'] = self.vm_char_limit_var.get()
-
-        # Speechify configuration
-        if 'speechify' not in self.config: self.config['speechify'] = {}
-        self.config['speechify']['api_key'] = self.speechify_api_key_var.get()
-        
-        if 'output_settings' not in self.config: self.config['output_settings'] = {}
-        self.config['output_settings']['use_default_dir'] = self.output_use_default_var.get()
-        self.config['output_settings']['default_dir'] = self.output_default_dir_var.get()
-        self.config['output_settings']['rewrite_default_dir'] = self.output_rewrite_default_dir_var.get()
-        if 'rewrite_settings' not in self.config: self.config['rewrite_settings'] = {}
-        self.config['rewrite_settings']['download_threads'] = self.rewrite_download_threads_var.get()
-        if 'telegram' not in self.config: self.config['telegram'] = {}
-        self.config['telegram']['enabled'] = self.tg_enabled_var.get()
-        self.config['telegram']['api_key'] = self.tg_api_key_var.get()
-        self.config['telegram']['chat_id'] = self.tg_chat_id_var.get()
-
-        if 'firebase' not in self.config: self.config['firebase'] = {}
-        self.config['firebase']['auto_clear_gallery'] = self.firebase_auto_clear_gallery_var.get()
-
-        # Зберігаємо User ID - але тепер це відбувається автоматично
-        # if 'user_settings' not in self.config: self.config['user_settings'] = {}
-        # self.config['user_settings']['user_id'] = self.user_id_var.get()
-
-        # Зберігаємо нове налаштування режиму звіту
-        display_value = self.tg_report_timing_var.get()
-        # Знаходимо ключ ('per_task' або 'per_language') за відображуваним значенням
-        internal_value = next((k for k, v in self.report_timing_display_map.items() if v == display_value), 'per_task')
-        self.config['telegram']['report_timing'] = internal_value
-        # Видаляємо збереження старих налаштувань notify_on
-        if 'notify_on' in self.config['telegram']:
-            del self.config['telegram']['notify_on']
-        if 'montage' not in self.config: self.config['montage'] = {}
-        self.config['montage']['ffmpeg_path'] = self.montage_ffmpeg_path_var.get()
-        self.config['montage']['whisper_model'] = self.montage_whisper_model_var.get()
-        self.config['montage']['motion_enabled'] = self.montage_motion_enabled_var.get()
-        self.config['montage']['motion_type'] = self.montage_motion_type_var.get()
-        self.config['montage']['motion_intensity'] = self.montage_motion_intensity_var.get()
-        self.config['montage']['zoom_enabled'] = self.montage_zoom_enabled_var.get()
-        self.config['montage']['zoom_intensity'] = self.montage_zoom_intensity_var.get()
-        self.config['montage']['zoom_speed'] = self.montage_zoom_speed_var.get()
-        self.config['montage']['transition_effect'] = self.montage_transition_var.get()
-        self.config['montage']['font_size'] = self.montage_font_size_var.get()
-        self.config['montage']['output_framerate'] = self.montage_output_framerate_var.get()
-        if 'codec' not in self.config['montage']: self.config['montage']['codec'] = {}
-        self.config['montage']['codec']['video_codec'] = self.codec_video_codec_var.get()
-        self.config['montage']['codec']['x264_crf'] = self.codec_x264_crf_var.get()
-        self.config['montage']['codec']['nvenc_cq'] = self.codec_nvenc_cq_var.get()
-        self.config['montage']['codec']['amf_usage'] = self.codec_amf_usage_var.get()
-        self.config['montage']['codec']['amf_quality'] = self.codec_amf_quality_var.get()
-        self.config['montage']['codec']['amf_rc'] = self.codec_amf_rc_var.get()
-        self.config['montage']['codec']['amf_bitrate'] = self.codec_amf_bitrate_var.get()
-        self.config['montage']['codec']['vt_bitrate'] = self.codec_vt_bitrate_var.get()
-        if "rewrite_prompt_templates" not in self.config:
-            self.config["rewrite_prompt_templates"] = {}
-        current_templates = list(self.rewrite_templates_listbox.get(0, tk.END))
-        for template_name in list(self.config["rewrite_prompt_templates"].keys()):
-            if template_name not in current_templates:
-                del self.config["rewrite_prompt_templates"][template_name]
-        for template_name in current_templates:
-            if template_name not in self.config["rewrite_prompt_templates"]:
-                 self.config["rewrite_prompt_templates"][template_name] = {}
-        if 'ui_settings' not in self.config: self.config['ui_settings'] = {}
-        self.config['ui_settings']['image_generation_api'] = self.active_image_api_var.get()
-        
-        selected_display_name = self.theme_var.get()
-        self.config['ui_settings']['theme'] = self.theme_map_to_internal.get(selected_display_name, "darkly")
-        
-        self.config['ui_settings']['image_control_enabled'] = self.image_control_var.get()
-        self.config['ui_settings']['auto_switch_service_on_fail'] = self.auto_switch_var.get()
-        self.config['ui_settings']['auto_switch_retry_limit'] = self.auto_switch_retries_var.get()
-
-        save_config(self.config)
-        self.or_api = OpenRouterAPI(self.config)
-        self.poll_api = PollinationsAPI(self.config, self)
-        self.recraft_api = RecraftAPI(self.config)
-        self.el_api = ElevenLabsAPI(self.config)
-        self.vm_api = VoiceMakerAPI(self.config)
-        self.tg_api = TelegramAPI(self.config)
-        self.firebase_api = FirebaseAPI(self.config)
-        self.speechify_api = SpeechifyAPI(self.config)
-        self.montage_api = MontageAPI(self.config, self, self.update_progress_for_montage)
-        setup_ffmpeg_path(self.config)
-        if self.selected_lang_code:
-            self.update_language_voice_dropdowns(self.selected_lang_code)
-        self.update_path_widgets_state()
-        messagebox.showinfo(self._t('saved_title'), self._t('info_settings_saved'))
+        """Зберігає всі налаштування додатку через утиліту settings_utils."""
+        save_settings_util(self)
 
     def update_elevenlabs_info(self, update_templates=True):
         balance = self.el_api.update_balance()
