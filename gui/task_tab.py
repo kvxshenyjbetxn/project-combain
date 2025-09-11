@@ -12,6 +12,11 @@ def on_language_checkbox_toggle(app, lang_code, var):
     else:
         # ВИПРАВЛЕНО: Тепер ми викликаємо функцію як метод об'єкта 'app'
         app.remove_language_output_path_widgets(lang_code)
+    
+    # Оновлюємо скрол-регіон після зміни
+    if hasattr(app, 'update_scroll_functions'):
+        for update_func in app.update_scroll_functions:
+            update_func()
 
 def add_language_output_path_widgets(app, lang_code):
     if lang_code in app.lang_widgets:
@@ -68,6 +73,11 @@ def add_language_output_path_widgets(app, lang_code):
         'button': browse_btn
     }
     app.update_path_widgets_state()
+    
+    # Оновлюємо скрол-регіон після додавання нових елементів
+    if hasattr(app, 'update_scroll_functions'):
+        for update_func in app.update_scroll_functions:
+            update_func()
 
 def browse_language_output_path(app, lang_code):
     folder = filedialog.askdirectory()

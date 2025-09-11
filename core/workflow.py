@@ -162,6 +162,9 @@ class WorkflowManager:
                             status_key = f"{task_idx_str}_{lang_code}"
                             if status_key in self.app.task_completion_status and step_name_key in self.app.task_completion_status[status_key]['steps']:
                                 self.app.task_completion_status[status_key]['steps'][step_name_key] = "✅"
+                
+                # Оновлюємо відображення після завершення транскрипції
+                self.app.root.after(0, self.app.update_task_status_display)
 
 
             # Phase 1: Parallel text processing
@@ -209,6 +212,9 @@ class WorkflowManager:
                         # Якщо текстовий етап провалився, відмічаємо всі наступні як провалені
                         for step_name in self.app.task_completion_status[status_key]['steps']:
                             self.app.task_completion_status[status_key]['steps'][step_name] = "❌"
+
+            # Оновлюємо відображення після завершення обробки тексту
+            self.app.root.after(0, self.app.update_task_status_display)
 
 
             # --- ЕТАП 2: ОДНОЧАСНА ГЕНЕРАЦІЯ МЕДІА ---
@@ -293,6 +299,13 @@ class WorkflowManager:
                             self.app.task_completion_status[status_key]['steps'][step_name] = "❌"
                         continue
 
+                    # Встановлюємо статус "в процесі" для створення відео
+                    if status_key in self.app.task_completion_status:
+                        step_name = self.app._t('step_name_create_video')
+                        if step_name in self.app.task_completion_status[status_key]['steps']:
+                            self.app.task_completion_status[status_key]['steps'][step_name] = "🔄"
+                            self.app.root.after(0, self.app.update_task_status_display)
+
                     image_chunks = np.array_split(all_images, len(data['audio_chunks']))
                     
                     video_chunk_paths = []
@@ -334,12 +347,14 @@ class WorkflowManager:
                             if status_key in self.app.task_completion_status:
                                 step_name = self.app._t('step_name_create_video')
                                 self.app.task_completion_status[status_key]['steps'][step_name] = "✅"
+                                self.app.root.after(0, self.app.update_task_status_display)
                             if is_rewrite:
                                 self.app.save_processed_link(data['task']['original_filename'])
                         else:
                              if status_key in self.app.task_completion_status:
                                 step_name = self.app._t('step_name_create_video')
                                 self.app.task_completion_status[status_key]['steps'][step_name] = "❌"
+                                self.app.root.after(0, self.app.update_task_status_display)
                     else:
                         logger.error(f"ПОМИЛКА: Не вдалося створити всі частини відео для завдання {task_key}.")
                         if status_key in self.app.task_completion_status:
@@ -573,6 +588,14 @@ class WorkflowManager:
         images_folder = data['text_results']['images_folder']
         lang_name = task_key[1].upper()
 
+        # Встановлюємо статус "в процесі" для генерації зображень
+        status_key = f"{task_key[0]}_{task_key[1]}"
+        if status_key in self.app.task_completion_status:
+            step_name = self.app._t('step_name_gen_images')
+            if step_name in self.app.task_completion_status[status_key]['steps']:
+                self.app.task_completion_status[status_key]['steps'][step_name] = "🔄"
+                self.app.root.after(0, self.app.update_task_status_display)
+
         with self.app.image_api_lock:
             if self.app.active_image_api is None:
                 self.app.active_image_api = self.app.active_image_api_var.get()
@@ -628,6 +651,8 @@ class WorkflowManager:
                     status_key = f"{task_key[0]}_{task_key[1]}"
                     if status_key in self.app.task_completion_status:
                         self.app.task_completion_status[status_key]["images_generated"] += 1
+                        # Оновлюємо відображення після кожного згенерованого зображення
+                        self.app.root.after(0, self.app.update_task_status_display)
                 else:
                     logger.error(f"Alternate service [{alt_service.capitalize()}] also failed to generate image {i+1}.")
                     all_successful = False
@@ -662,6 +687,8 @@ class WorkflowManager:
                 status_key = f"{task_key[0]}_{task_key[1]}"
                 if status_key in self.app.task_completion_status:
                     self.app.task_completion_status[status_key]["images_generated"] += 1
+                    # Оновлюємо відображення після кожного згенерованого зображення  
+                    self.app.root.after(0, self.app.update_task_status_display)
                 i += 1 
             else:
                 consecutive_failures += 1
@@ -706,11 +733,39 @@ class WorkflowManager:
                 all_successful = False
                 i += 1
 
+        # Встановлюємо фінальний статус для генерації зображень
+        status_key = f"{task_key[0]}_{task_key[1]}"
+        if status_key in self.app.task_completion_status:
+            step_name = self.app._t('step_name_gen_images')
+            if step_name in self.app.task_completion_status[status_key]['steps']:
+                final_status = "✅" if all_successful else "❌"
+                self.app.task_completion_status[status_key]['steps'][step_name] = final_status
+                self.app.root.after(0, self.app.update_task_status_display)
+
         return all_successful
 
     def _audio_subs_pipeline_master(self, processing_data, is_rewrite=False, queue_type='main'):
         """Керує пайплайном Аудіо -> Транскрипція з централізованою логікою."""
         logger.info("[Audio/Subs Master] Запуск керованого пайплайну.")
+        
+        # Встановлюємо статус "в процесі" для аудіо та субтитрів
+        for task_key, data in processing_data.items():
+            if data.get('text_results'):
+                task_idx_str, lang_code = task_key
+                status_key = f"{task_idx_str}_{lang_code}"
+                if status_key in self.app.task_completion_status:
+                    # Встановлюємо статус "в процесі" для аудіо
+                    audio_step = self.app._t('step_name_audio')
+                    if audio_step in self.app.task_completion_status[status_key]['steps']:
+                        self.app.task_completion_status[status_key]['steps'][audio_step] = "🔄"
+                    
+                    # Встановлюємо статус "в процесі" для субтитрів
+                    subs_step = self.app._t('step_name_create_subtitles')
+                    if subs_step in self.app.task_completion_status[status_key]['steps']:
+                        self.app.task_completion_status[status_key]['steps'][subs_step] = "🔄"
+        
+        # Оновлюємо відображення
+        self.app.root.after(0, self.app.update_task_status_display)
         
         num_parallel_chunks = self.config.get('parallel_processing', {}).get('num_chunks', 3)
         self.audio_worker_pool = AudioWorkerPool(self.app, num_parallel_chunks)
@@ -868,6 +923,27 @@ class WorkflowManager:
             for tk, info in tasks_info.items():
                 info['data']['subs_chunks'].sort()
                 info['data']['audio_chunks'].sort()
+                
+                # Встановлюємо фінальний статус для аудіо та субтитрів
+                task_idx_str, lang_code = tk
+                status_key = f"{task_idx_str}_{lang_code}"
+                if status_key in self.app.task_completion_status:
+                    # Перевіряємо чи всі аудіо та субтитри завершені успішно
+                    has_audio = len(info['data'].get('audio_chunks', [])) > 0
+                    has_subs = len(info['data'].get('subs_chunks', [])) > 0
+                    
+                    # Встановлюємо статус для аудіо
+                    audio_step = self.app._t('step_name_audio')
+                    if audio_step in self.app.task_completion_status[status_key]['steps']:
+                        self.app.task_completion_status[status_key]['steps'][audio_step] = "✅" if has_audio else "❌"
+                    
+                    # Встановлюємо статус для субтитрів
+                    subs_step = self.app._t('step_name_create_subtitles')
+                    if subs_step in self.app.task_completion_status[status_key]['steps']:
+                        self.app.task_completion_status[status_key]['steps'][subs_step] = "✅" if has_subs else "❌"
+            
+            # Оновлюємо відображення
+            self.app.root.after(0, self.app.update_task_status_display)
 
         finally:
             if self.audio_worker_pool:

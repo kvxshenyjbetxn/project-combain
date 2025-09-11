@@ -588,17 +588,70 @@ class TranslationApp:
             parent = target_widget
             while parent:
                 if isinstance(parent, tk.Canvas) and parent in self.scrollable_canvases:
-                    delta = 0
-                    if sys.platform == "darwin": delta = event.delta
-                    elif event.num == 4: delta = -1
-                    elif event.num == 5: delta = 1
-                    elif event.delta: delta = -1 * int(event.delta / 120)
-                    if delta != 0:
-                        parent.yview_scroll(delta, "units")
+                    # Перевіряємо чи потрібна прокрутка для цього канвасу
+                    canvas = parent
+                    canvas_height = canvas.winfo_height()
+                    scroll_region = canvas.cget('scrollregion')
+                    
+                    if scroll_region:
+                        # Розбираємо scrollregion (x1, y1, x2, y2)
+                        region_coords = scroll_region.split()
+                        if len(region_coords) >= 4:
+                            content_height = float(region_coords[3]) - float(region_coords[1])
+                            
+                            # Дозволяємо прокрутку тільки якщо контент більший за канвас
+                            if content_height > canvas_height:
+                                delta = 0
+                                if sys.platform == "darwin": 
+                                    delta = event.delta
+                                elif event.num == 4: 
+                                    delta = -1
+                                elif event.num == 5: 
+                                    delta = 1
+                                elif event.delta: 
+                                    delta = -1 * int(event.delta / 120)
+                                if delta != 0:
+                                    canvas.yview_scroll(delta, "units")
                     return 
-                if parent == self.root: break
+                if parent == self.root: 
+                    break
                 parent = parent.master
-        except (KeyError, AttributeError):
+        except (KeyError, AttributeError, ValueError):
+            pass
+
+    def _on_tab_changed(self, event):
+        """Обробник зміни вкладок для скидання прокрутки"""
+        try:
+            # Отримуємо поточну активну вкладку
+            current_tab = self.notebook.select()
+            current_tab_widget = self.notebook.nametowidget(current_tab)
+            
+            # Знаходимо всі канваси в поточній вкладці
+            for canvas in self.scrollable_canvases:
+                try:
+                    # Перевіряємо чи канвас належить поточній вкладці
+                    parent = canvas.master
+                    while parent and parent != self.root:
+                        if parent == current_tab_widget:
+                            # Оновлюємо скрол-регіон
+                            canvas.update_idletasks()
+                            canvas.configure(scrollregion=canvas.bbox("all"))
+                            
+                            # Скидаємо прокрутку вгору
+                            canvas.yview_moveto(0)
+                            break
+                        parent = parent.master
+                except:
+                    continue
+                    
+            # Викликаємо функції оновлення скролу, якщо вони є
+            if hasattr(self, 'update_scroll_functions'):
+                for update_func in self.update_scroll_functions:
+                    try:
+                        update_func()
+                    except:
+                        continue
+        except:
             pass
 
     def setup_gui(self):
@@ -622,6 +675,9 @@ class TranslationApp:
         create_rewrite_tab(self.notebook, self)
         create_settings_tab(self.notebook, self)
         create_log_tab(self.notebook, self)
+
+        # Додаємо обробник зміни вкладок для скидання прокрутки
+        self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
         # Image gallery frame setup (initially hidden)
         self.image_gallery_frame = ttk.Frame(self.root)
@@ -691,6 +747,11 @@ class TranslationApp:
             del self.lang_output_path_vars[lang_code]
             del self.lang_step_vars[lang_code]
             del self.lang_step_checkboxes[lang_code]
+            
+            # Оновлюємо скрол-регіон після видалення елементів
+            if hasattr(self, 'update_scroll_functions'):
+                for update_func in self.update_scroll_functions:
+                    update_func()
 
     def update_queue_display(self):
         if not hasattr(self, 'queue_tree'):
@@ -699,28 +760,159 @@ class TranslationApp:
         for item in self.queue_tree.get_children():
             self.queue_tree.delete(item)
         
-        steps_map = {
-            'translate': self._t('step_translate'), 'cta': self._t('step_cta'), 
-            'gen_prompts': self._t('step_gen_prompts'), 'gen_images': self._t('step_gen_images'), 
-            'audio': self._t('step_audio'), 'create_subtitles': self._t('step_create_subtitles'),
-            'create_video': self._t('step_create_video')
+        # Мапа кроків з емодзі для кращого візуального сприйняття
+        steps_emoji_map = {
+            'translate': '📝', 'cta': '🎯', 'gen_prompts': '💡', 
+            'gen_images': '🖼️', 'audio': '🎤', 'create_subtitles': '✒️',
+            'create_video': '🎬', 'transcribe': '🎙️'
+        }
+        
+        # Мапа мов до прапорів
+        lang_flags = {
+            'ro': '🇷🇴', 'en': '🇺🇸', 'es': '🇪🇸', 'fr': '🇫🇷', 'de': '🇩🇪',
+            'it': '🇮🇹', 'pt': '🇵🇹', 'ru': '🇷🇺', 'pl': '🇵🇱', 'nl': '🇳🇱',
+            'uk': '🇺🇦', 'ja': '🇯🇵', 'ko': '🇰🇷', 'zh': '🇨🇳', 'ar': '🇸🇦'
         }
 
         for i, task in enumerate(self.task_queue):
             timestamp = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(task['timestamp']))
             task_name = task.get('task_name', f"{self._t('task_label')} {i+1}")
-            task_node = self.queue_tree.insert("", "end", iid=f"task_{i}", text=task_name, values=(self._t('status_pending'), timestamp), open=True)
+            
+            # Розрахунок загального прогресу завдання
+            total_progress = self._calculate_task_progress(i)
+            progress_text = f"({total_progress}%)" if total_progress > 0 else ""
+            
+            task_node = self.queue_tree.insert("", "end", iid=f"task_{i}", 
+                                             text=f"📋 {task_name} {progress_text}", 
+                                             values=(self._t('status_pending'), timestamp), open=True)
             
             for lang_code in task['selected_langs']:
                 use_default_dir = self.config.get("output_settings", {}).get("use_default_dir", False)
                 lang_path_display = self._t('use_default_dir_label') if use_default_dir else task['lang_output_paths'].get(lang_code, '...')
                 
-                lang_node = self.queue_tree.insert(task_node, "end", text=f"  - {lang_code.upper()}", values=("", ""))
+                # Отримуємо прапор мови або використовуємо емодзі за замовчуванням
+                lang_flag = lang_flags.get(lang_code.lower(), '🏳️')
                 
-                self.queue_tree.insert(lang_node, "end", text=f"    {self._t('path_label')}: {lang_path_display}", values=("", ""))
+                # Розрахунок прогресу для конкретної мови
+                lang_progress = self._calculate_language_progress(i, lang_code)
+                lang_progress_text = f"({lang_progress}%)" if lang_progress > 0 else ""
                 
-                enabled_steps = [steps_map[key] for key, value in task['steps'][lang_code].items() if value]
-                self.queue_tree.insert(lang_node, "end", text=f"    {self._t('steps_label')}: {', '.join(enabled_steps)}", values=("", ""))
+                lang_node = self.queue_tree.insert(task_node, "end", 
+                                                 text=f"{lang_flag} {lang_code.upper()} {lang_progress_text}", 
+                                                 values=("", ""), open=True)
+                
+                # Показуємо шлях
+                self.queue_tree.insert(lang_node, "end", text=f"    📁 {self._t('path_label')}: {lang_path_display}", values=("", ""))
+                
+                # Показуємо детальний прогрес кожного кроку
+                for step_key, enabled in task['steps'][lang_code].items():
+                    if enabled:
+                        emoji = steps_emoji_map.get(step_key, '⚙️')
+                        step_name = self._t(f'step_{step_key}')
+                        
+                        # Отримуємо статус кроку з task_completion_status
+                        status_icon = self._get_step_status(i, lang_code, step_key)
+                        
+                        # Особлива обробка для генерації зображень
+                        if step_key == 'gen_images':
+                            image_progress = self._get_image_progress(i, lang_code)
+                            step_text = f"    {emoji} {step_name}: {status_icon} {image_progress}"
+                        else:
+                            step_text = f"    {emoji} {step_name}: {status_icon}"
+                        
+                        self.queue_tree.insert(lang_node, "end", text=step_text, values=("", ""))
+
+    def _calculate_task_progress(self, task_index):
+        """Розраховує загальний прогрес завдання у відсотках"""
+        if not hasattr(self, 'task_completion_status'):
+            return 0
+        
+        task = self.task_queue[task_index] if task_index < len(self.task_queue) else None
+        if not task:
+            return 0
+        
+        total_steps = 0
+        completed_steps = 0
+        
+        for lang_code in task['selected_langs']:
+            status_key = f"{task_index}_{lang_code}"
+            if status_key in self.task_completion_status:
+                for step_status in self.task_completion_status[status_key]['steps'].values():
+                    total_steps += 1
+                    if step_status == "✅":
+                        completed_steps += 1
+        
+        return int((completed_steps / total_steps * 100)) if total_steps > 0 else 0
+    
+    def _calculate_language_progress(self, task_index, lang_code):
+        """Розраховує прогрес для конкретної мови у відсотках"""
+        if not hasattr(self, 'task_completion_status'):
+            return 0
+        
+        status_key = f"{task_index}_{lang_code}"
+        if status_key not in self.task_completion_status:
+            return 0
+        
+        steps = self.task_completion_status[status_key]['steps']
+        total_steps = len(steps)
+        completed_steps = sum(1 for status in steps.values() if status == "✅")
+        
+        return int((completed_steps / total_steps * 100)) if total_steps > 0 else 0
+    
+    def _get_step_status(self, task_index, lang_code, step_key):
+        """Отримує статус конкретного кроку"""
+        if not hasattr(self, 'task_completion_status'):
+            return "⚪️"
+        
+        status_key = f"{task_index}_{lang_code}"
+        if status_key not in self.task_completion_status:
+            return "⚪️"
+        
+        step_name = self._t(f'step_name_{step_key}')
+        if step_name in self.task_completion_status[status_key]['steps']:
+            status = self.task_completion_status[status_key]['steps'][step_name]
+            if status == "✅":
+                return "✅"
+            elif status == "❌":
+                return "❌"
+            elif status == "🔄":
+                return "🔄"
+        
+        return "⚪️"
+    
+    def _get_image_progress(self, task_index, lang_code):
+        """Отримує прогрес генерації зображень"""
+        if not hasattr(self, 'task_completion_status'):
+            return ""
+        
+        status_key = f"{task_index}_{lang_code}"
+        if status_key not in self.task_completion_status:
+            return ""
+        
+        status_info = self.task_completion_status[status_key]
+        total_images = status_info.get('total_images', 0)
+        generated_images = status_info.get('images_generated', 0)
+        
+        if total_images > 0:
+            return f"({generated_images}/{total_images})"
+        return ""
+    
+    def update_task_status_display(self, task_index=None, lang_code=None, step_key=None, status=None):
+        """Оновлює статус конкретного кроку в черзі завдань"""
+        if not hasattr(self, 'queue_tree'):
+            return
+        
+        # Якщо не вказано конкретне завдання, оновлюємо весь дисплей
+        if task_index is None:
+            self.update_queue_display()
+            return
+        
+        # Знаходимо відповідний елемент в дереві та оновлюємо його
+        try:
+            # Оновлюємо відображення після короткої затримки, щоб уникнути зависання UI
+            self.root.after(100, self.update_queue_display)
+        except:
+            pass  # Ігноруємо помилки, якщо GUI недоступний
 
     def process_queue(self):
         if self.is_processing_queue:
