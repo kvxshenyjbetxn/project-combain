@@ -94,12 +94,13 @@ class WorkflowManager:
 
         try:
             queue_to_process = list(queue_to_process_list)
-            if is_rewrite:
-                self.app.rewrite_task_queue.clear()
-                self.app.update_rewrite_queue_display()
-            else:
-                self.app.task_queue.clear()
-                self.app.update_queue_display()
+            # НЕ очищуємо черги тут - вони будуть очищені після завершення
+            # if is_rewrite:
+            #     self.app.rewrite_task_queue.clear()
+            #     self.app.update_rewrite_queue_display()
+            # else:
+            #     self.app.task_queue.clear()
+            #     self.app.update_queue_display()
             
             # Ініціалізація статусу для всіх завдань у черзі
             self.app.task_completion_status = {}
@@ -397,11 +398,15 @@ class WorkflowManager:
 
             self.app.stop_telegram_polling.set()
             self.app._update_button_states(is_processing=False, is_image_stuck=False)
+            
+            # Очищуємо черги після завершення обробки
             if is_rewrite:
                 self.app.is_processing_rewrite_queue = False
+                self.app.rewrite_task_queue.clear()
                 self.app.root.after(0, self.app.update_rewrite_queue_display)
             else:
                 self.app.is_processing_queue = False
+                self.app.task_queue.clear()
                 self.app.root.after(0, self.app.update_queue_display)
             
             if hasattr(self.app, 'pause_resume_button'):

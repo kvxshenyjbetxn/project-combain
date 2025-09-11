@@ -763,20 +763,6 @@ class TranslationApp:
         
         for item in self.queue_tree.get_children():
             self.queue_tree.delete(item)
-        
-        # Мапа кроків з емодзі для кращого візуального сприйняття
-        steps_emoji_map = {
-            'translate': '📝', 'cta': '🎯', 'gen_prompts': '💡', 
-            'gen_images': '🖼️', 'audio': '🎤', 'create_subtitles': '✒️',
-            'create_video': '🎬', 'transcribe': '🎙️'
-        }
-        
-        # Мапа мов до прапорів
-        lang_flags = {
-            'ro': '🇷🇴', 'en': '🇺🇸', 'es': '🇪🇸', 'fr': '🇫🇷', 'de': '🇩🇪',
-            'it': '🇮🇹', 'pt': '🇵🇹', 'ru': '🇷🇺', 'pl': '🇵🇱', 'nl': '🇳🇱',
-            'uk': '🇺🇦', 'ja': '🇯🇵', 'ko': '🇰🇷', 'zh': '🇨🇳', 'ar': '🇸🇦'
-        }
 
         for i, task in enumerate(self.task_queue):
             timestamp = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(task['timestamp']))
@@ -787,42 +773,37 @@ class TranslationApp:
             progress_text = f"({total_progress}%)" if total_progress > 0 else ""
             
             task_node = self.queue_tree.insert("", "end", iid=f"task_{i}", 
-                                             text=f"📋 {task_name} {progress_text}", 
+                                             text=f"{task_name} {progress_text}", 
                                              values=(self._t('status_pending'), timestamp), open=True)
             
             for lang_code in task['selected_langs']:
                 use_default_dir = self.config.get("output_settings", {}).get("use_default_dir", False)
                 lang_path_display = self._t('use_default_dir_label') if use_default_dir else task['lang_output_paths'].get(lang_code, '...')
                 
-                # Отримуємо прапор мови або використовуємо емодзі за замовчуванням
-                lang_flag = lang_flags.get(lang_code.lower(), '🏳️')
-                
                 # Розрахунок прогресу для конкретної мови
                 lang_progress = self._calculate_language_progress(i, lang_code)
                 lang_progress_text = f"({lang_progress}%)" if lang_progress > 0 else ""
                 
                 lang_node = self.queue_tree.insert(task_node, "end", 
-                                                 text=f"{lang_flag} {lang_code.upper()} {lang_progress_text}", 
+                                                 text=f"{lang_code.upper()} {lang_progress_text}", 
                                                  values=("", ""), open=True)
                 
                 # Показуємо шлях
-                self.queue_tree.insert(lang_node, "end", text=f"    📁 {self._t('path_label')}: {lang_path_display}", values=("", ""))
+                self.queue_tree.insert(lang_node, "end", text=f"{self._t('path_label')}: {lang_path_display}", values=("", ""))
                 
                 # Показуємо детальний прогрес кожного кроку
                 for step_key, enabled in task['steps'][lang_code].items():
                     if enabled:
-                        emoji = steps_emoji_map.get(step_key, '⚙️')
                         step_name = self._t(f'step_{step_key}')
                         
                         # Отримуємо статус кроку з task_completion_status
-                        status_icon = self._get_step_status(i, lang_code, step_key)
+                        status_text = self._get_step_status(i, lang_code, step_key)
                         
-                        # Особлива обробка для генерації зображень
-                        if step_key == 'gen_images':
-                            image_progress = self._get_image_progress(i, lang_code)
-                            step_text = f"    {emoji} {step_name}: {status_icon} {image_progress}"
+                        # Формуємо текст з вирівнюванням
+                        if status_text:
+                            step_text = f"{step_name}: {status_text}"
                         else:
-                            step_text = f"    {emoji} {step_name}: {status_icon}"
+                            step_text = step_name
                         
                         self.queue_tree.insert(lang_node, "end", text=step_text, values=("", ""))
         
@@ -934,28 +915,7 @@ class TranslationApp:
         return int((completed_steps / total_steps * 100)) if total_steps > 0 else 0
     
     def _get_step_status(self, task_index, lang_code, step_key):
-        """Отримує статус конкретного кроку"""
-        if not hasattr(self, 'task_completion_status'):
-            return "⚪️"
-        
-        status_key = f"{task_index}_{lang_code}"
-        if status_key not in self.task_completion_status:
-            return "⚪️"
-        
-        step_name = self._t(f'step_name_{step_key}')
-        if step_name in self.task_completion_status[status_key]['steps']:
-            status = self.task_completion_status[status_key]['steps'][step_name]
-            if status == "✅":
-                return "✅"
-            elif status == "❌":
-                return "❌"
-            elif status == "🔄":
-                return "🔄"
-        
-        return "⚪️"
-    
-    def _get_image_progress(self, task_index, lang_code):
-        """Отримує прогрес генерації зображень"""
+        """Отримує статус конкретного кроку у вигляді тексту"""
         if not hasattr(self, 'task_completion_status'):
             return ""
         
@@ -963,12 +923,42 @@ class TranslationApp:
         if status_key not in self.task_completion_status:
             return ""
         
-        status_info = self.task_completion_status[status_key]
-        total_images = status_info.get('total_images', 0)
-        generated_images = status_info.get('images_generated', 0)
+        # Спеціальна обробка для різних типів кроків
+        if step_key == 'gen_images':
+            # Для зображень показуємо прогрес
+            status_info = self.task_completion_status[status_key]
+            total_images = status_info.get('total_images', 0)
+            generated_images = status_info.get('images_generated', 0)
+            if total_images > 0:
+                return f"{generated_images}/{total_images}"
+            return ""
         
-        if total_images > 0:
-            return f"({generated_images}/{total_images})"
+        elif step_key in ['audio', 'create_subtitles', 'create_video']:
+            # Для аудіо, субтитрів і відео показуємо прогрес файлів
+            step_name = self._t(f'step_name_{step_key}')
+            if step_name in self.task_completion_status[status_key]['steps']:
+                status = self.task_completion_status[status_key]['steps'][step_name]
+                if status == "✅":
+                    return "Готово"
+                elif status == "❌":
+                    return "Помилка"
+                elif status == "🔄":
+                    return "В процесі"
+            return ""
+        
+        elif step_key in ['translate', 'cta', 'gen_prompts']:
+            # Для перекладу та генерації просто показуємо статус
+            step_name = self._t(f'step_name_{step_key}')
+            if step_name in self.task_completion_status[status_key]['steps']:
+                status = self.task_completion_status[status_key]['steps'][step_name]
+                if status == "✅":
+                    return "Готово"
+                elif status == "❌":
+                    return "Помилка"
+                elif status == "🔄":
+                    return "В процесі"
+            return ""
+        
         return ""
     
     def update_task_status_display(self, task_index=None, lang_code=None, step_key=None, status=None):
