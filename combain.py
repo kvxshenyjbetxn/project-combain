@@ -75,7 +75,13 @@ from utils import (
     chunk_text_voicemaker,
     chunk_text_speechify,
     concatenate_audio_files,
-    suppress_stdout_stderr
+    suppress_stdout_stderr,
+    clear_user_logs,
+    clear_user_images,
+    refresh_user_stats,
+    refresh_firebase_stats,
+    clear_firebase_logs,
+    clear_firebase_images
 )
 
 from utils.settings_utils import save_settings as save_settings_util
@@ -2410,137 +2416,29 @@ class TranslationApp:
                  shutil.rmtree(temp_dir)
                  logger.info(f"Cleaned up temp directory: {temp_dir}")
 
-    def save_user_id(self):
-        """DEPRECATED: User ID тепер генерується автоматично."""
-        # Цей метод більше не потрібен, ID генерується автоматично
-        pass
-
     def clear_user_logs(self):
         """Очищує логи поточного користувача."""
-        if not hasattr(self, 'firebase_api') or not self.firebase_api or not self.firebase_api.is_initialized:
-            messagebox.showerror(self._t('error_title'), "Firebase не підключено!")
-            return
-            
-        user_id = self.firebase_api.get_current_user_id()
-        if not user_id or user_id == "default":
-            messagebox.showerror(self._t('error_title'), "User ID не ініціалізовано!")
-            return
-            
-        if messagebox.askyesno(self._t('confirm_title'), 
-                             f"Очистити всі логи для користувача '{user_id}'?\n\nЦе дія незворотна!"):
-            success = self.firebase_api.clear_user_logs()
-            if success:
-                self.refresh_user_stats()
-                messagebox.showinfo(self._t('info_title'), "Ваші логи успішно очищено!")
-            else:
-                messagebox.showerror(self._t('error_title'), "Помилка очищення логів!")
+        clear_user_logs(self)
 
     def clear_user_images(self):
         """Очищує зображення поточного користувача."""
-        if not hasattr(self, 'firebase_api') or not self.firebase_api or not self.firebase_api.is_initialized:
-            messagebox.showerror(self._t('error_title'), "Firebase не підключено!")
-            return
-            
-        user_id = self.firebase_api.get_current_user_id()
-        if not user_id or user_id == "default":
-            messagebox.showerror(self._t('error_title'), "User ID не ініціалізовано!")
-            return
-            
-        if messagebox.askyesno(self._t('confirm_title'), 
-                             f"Очистити всі зображення для користувача '{user_id}'?\n\nЦе дія незворотна!"):
-            success = self.firebase_api.clear_user_images()
-            if success:
-                self.refresh_user_stats()
-                messagebox.showinfo(self._t('info_title'), "Ваші зображення успішно очищено!")
-            else:
-                messagebox.showerror(self._t('error_title'), "Помилка очищення зображень!")
+        clear_user_images(self)
 
     def refresh_user_stats(self):
         """Оновлює статистику поточного користувача та відображення User ID."""
-        if not hasattr(self, 'firebase_api') or not self.firebase_api or not self.firebase_api.is_initialized:
-            if hasattr(self, 'user_stats_label'):
-                self.user_stats_label.config(text="Firebase не підключено")
-            if hasattr(self, 'current_user_id_label'):
-                self.current_user_id_label.config(text="Firebase не підключено")
-            return
-            
-        user_id = self.firebase_api.get_current_user_id()
-        if not user_id:
-            if hasattr(self, 'user_stats_label'):
-                self.user_stats_label.config(text="User ID не ініціалізовано")
-            if hasattr(self, 'current_user_id_label'):
-                self.current_user_id_label.config(text="Не ініціалізовано")
-            return
-            
-        # Оновлюємо відображення User ID
-        if hasattr(self, 'current_user_id_label'):
-            self.current_user_id_label.config(text=user_id)
-            
-        # Оновлюємо статистику
-        stats = self.firebase_api.get_user_stats()
-        if stats and hasattr(self, 'user_stats_label'):
-            stats_text = f"Користувач: {user_id} | Логи: {stats['logs']} | Зображення: {stats['images']}"
-            self.user_stats_label.config(text=stats_text)
-        elif hasattr(self, 'user_stats_label'):
-            self.user_stats_label.config(text=f"Користувач: {user_id} | Помилка завантаження статистики")
+        refresh_user_stats(self)
 
     def refresh_firebase_stats(self):
         """Оновлює статистику Firebase."""
-        if not hasattr(self, 'firebase_api') or not self.firebase_api or not self.firebase_api.is_initialized:
-            if hasattr(self, 'firebase_logs_stat_var'):
-                self.firebase_logs_stat_var.set("Firebase not connected")
-            if hasattr(self, 'firebase_images_stat_var'):
-                self.firebase_images_stat_var.set("Firebase not connected")
-            return
-            
-        try:
-            stats = self.firebase_api.get_user_stats()
-            if stats:
-                if hasattr(self, 'firebase_logs_stat_var'):
-                    self.firebase_logs_stat_var.set(str(stats['logs']))
-                if hasattr(self, 'firebase_images_stat_var'):
-                    self.firebase_images_stat_var.set(str(stats['images']))
-                if hasattr(self, 'firebase_user_id_var'):
-                    self.firebase_user_id_var.set(self.firebase_api.get_current_user_id() or "Not available")
-            else:
-                if hasattr(self, 'firebase_logs_stat_var'):
-                    self.firebase_logs_stat_var.set("Error loading")
-                if hasattr(self, 'firebase_images_stat_var'):
-                    self.firebase_images_stat_var.set("Error loading")
-        except Exception as e:
-            print(f"Error refreshing Firebase stats: {e}")
-            if hasattr(self, 'firebase_logs_stat_var'):
-                self.firebase_logs_stat_var.set("Error")
-            if hasattr(self, 'firebase_images_stat_var'):
-                self.firebase_images_stat_var.set("Error")
+        refresh_firebase_stats(self)
 
     def clear_firebase_logs(self):
         """Очищає логи Firebase."""
-        if not hasattr(self, 'firebase_api') or not self.firebase_api or not self.firebase_api.is_initialized:
-            messagebox.showerror("Error", "Firebase not connected!")
-            return
-            
-        if messagebox.askyesno("Confirm", "Clear all your logs from Firebase?\n\nThis action cannot be undone!"):
-            success = self.firebase_api.clear_user_logs()
-            if success:
-                self.refresh_firebase_stats()
-                messagebox.showinfo("Success", "Your logs have been cleared!")
-            else:
-                messagebox.showerror("Error", "Failed to clear logs!")
+        clear_firebase_logs(self)
 
     def clear_firebase_images(self):
         """Очищає зображення Firebase."""
-        if not hasattr(self, 'firebase_api') or not self.firebase_api or not self.firebase_api.is_initialized:
-            messagebox.showerror("Error", "Firebase not connected!")
-            return
-            
-        if messagebox.askyesno("Confirm", "Clear all your images from Firebase?\n\nThis action cannot be undone!"):
-            success = self.firebase_api.clear_user_images()
-            if success:
-                self.refresh_firebase_stats()
-                messagebox.showinfo("Success", "Your images have been cleared!")
-            else:
-                messagebox.showerror("Error", "Failed to clear images!")
+        clear_firebase_images(self)
 
 if __name__ == "__main__":
     """Main entry point for the Content Translation and Generation Application.
