@@ -768,6 +768,26 @@ class WorkflowManager:
                         audio_paths_to_merge = [item.output_path for item in sorted_items]
                         groups = np.array_split(audio_paths_to_merge, num_parallel_chunks)
                         
+                        # Нова логіка, щоб залишок йшов в останню групу
+                        n = len(audio_paths_to_merge)
+                        k = num_parallel_chunks
+                        
+                        groups = []
+                        if n > 0 and k > 0:
+                            base_size = n // k
+                            
+                            start_index = 0
+                            # Перші k-1 груп
+                            for _ in range(k - 1):
+                                end_index = start_index + base_size
+                                group = audio_paths_to_merge[start_index:end_index]
+                                if group: groups.append(group)
+                                start_index = end_index
+                            
+                            # Остання група отримує все, що залишилось
+                            last_group = audio_paths_to_merge[start_index:]
+                            if last_group: groups.append(last_group)
+                        
                         for i, group in enumerate(groups):
                             if not group.any(): continue
                             
