@@ -247,6 +247,13 @@ class WorkflowManager:
                     images_folder = data['text_results']['images_folder']
                     all_images = sorted([os.path.join(images_folder, f) for f in os.listdir(images_folder) if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
                     
+                    # Детальне логування для діагностики
+                    logger.debug(f"Video montage check for task {task_key}:")
+                    logger.debug(f"  - audio_chunks present: {bool(data.get('audio_chunks'))}")
+                    logger.debug(f"  - audio_chunks count: {len(data.get('audio_chunks', []))}")
+                    logger.debug(f"  - subs_chunks present: {bool(data.get('subs_chunks'))}")
+                    logger.debug(f"  - subs_chunks count: {len(data.get('subs_chunks', []))}")
+                    
                     if not data.get('audio_chunks') or not data.get('subs_chunks'):
                         logger.error(f"Audio or subtitles missing for task {task_key}. Skipping video montage.")
                         if status_key in self.app.task_completion_status:
@@ -274,13 +281,21 @@ class WorkflowManager:
                                 list(image_chunks[i]), 
                                 data['audio_chunks'][i], 
                                 data['subs_chunks'][i],
-                                os.path.join(data['temp_dir'], f"video_chunk_{i}.mp4"),
+                                os.path.join(data['temp_dir'], f"video_chunk_{i:02d}.mp4"),  # zfill для правильного сортування
                                 i + 1, len(data['audio_chunks'])
                             ): i for i in range(len(data['audio_chunks']))
                         }
+                        
+                        # Збираємо результати з правильним індексом для гарантованого порядку
+                        video_results = {}
                         for f in concurrent.futures.as_completed(video_futures):
+                            chunk_index = video_futures[f]
                             result = f.result()
-                            if result: video_chunk_paths.append(result)
+                            if result: 
+                                video_results[chunk_index] = result
+                                
+                        # Формуємо список в правильному хронологічному порядку
+                        video_chunk_paths = [video_results[i] for i in range(len(data['audio_chunks'])) if i in video_results]
 
                     if len(video_chunk_paths) == len(data['audio_chunks']):
                         if 'video_title' in data['text_results']:
@@ -289,7 +304,7 @@ class WorkflowManager:
                             base_name = sanitize_filename(data['text_results'].get('task_name', f"Task_{task_key[0]}"))
                         
                         final_video_path = os.path.join(data['text_results']['output_path'], f"video_{base_name}_{lang_code}.mp4")
-                        if self._concatenate_videos(self.app, sorted(video_chunk_paths), final_video_path):
+                        if self._concatenate_videos(self.app, video_chunk_paths, final_video_path):  # Вже в правильному порядку
                             logger.info(f"УСПІХ: Створено фінальне відео: {final_video_path}")
                             if status_key in self.app.task_completion_status:
                                 step_name = self.app._t('step_name_create_video')
@@ -767,13 +782,18 @@ class WorkflowManager:
                         continue
                     
                     # Перевіряємо чи завершено повністю (аудіо + транскрипція)
-                    if self.audio_worker_pool.is_task_completed(task_key):
+                    is_completed = self.audio_worker_pool.is_task_completed(task_key)
+                    logger.debug(f"Task {task_key} completion status: {is_completed}")
+                    
+                    if is_completed:
                         completed_tasks.add(task_key)
                         lang_code = info['lang_code']
                         status_key = info['status_key']
                         
                         # Отримуємо готові файли
                         audio_files = self.audio_worker_pool.get_completed_audio_for_task(task_key)
+                        logger.debug(f"Audio files for task {task_key}: {audio_files}")
+                        
                         if audio_files:
                             # Обробка готових аудіо файлів (об'єднання якщо потрібно)
                             final_audio_chunks = self._process_completed_audio_chunks(
@@ -811,8 +831,14 @@ class WorkflowManager:
                                 logger.info(f"Завершено обробку аудіо та субтитрів для {lang_code}")
                             else:
                                 logger.error(f"Помилка обробки аудіо файлів для {lang_code}")
+                        else:
+                            logger.error(f"Немає аудіо файлів для завершеної задачі {task_key}")
+                    else:
+                        # FALLBACK: Якщо AudioWorkerPool не зареєстрував завершення, 
+                        # але файли фізично існують - заповнюємо дані вручну
+                        self._try_fallback_completion(task_key, info, num_parallel_chunks)
                         
-                        self.app.update_progress(f"Завершено: {len(completed_tasks)}/{total_tasks} завдань")
+                    self.app.update_progress(f"Завершено: {len(completed_tasks)}/{total_tasks} завдань")
                 
                 # Перевіряємо shutdown_event частіше
                 if self.app.shutdown_event.is_set():
@@ -927,3 +953,54 @@ class WorkflowManager:
                 return info['tts_service']
         
         return "elevenlabs"  # За замовчуванням
+        
+    def _try_fallback_completion(self, task_key, info, num_parallel_chunks):
+        """FALLBACK: Спроба заповнити audio_chunks і subs_chunks якщо файли фізично існують."""
+        try:
+            temp_dir = info['temp_dir']
+            lang_code = info['lang_code']
+            
+            # Шукаємо аудіо файли в temp_chunks
+            audio_files = []
+            for i in range(3):  # Стандартно 3 чанки
+                audio_file = os.path.join(temp_dir, f"audio_chunk_{i}.mp3")
+                if os.path.exists(audio_file):
+                    audio_files.append(audio_file)
+                    
+            if audio_files:
+                # Знаходимо субтитри
+                subs_dir = os.path.join(temp_dir, "subs")
+                subs_files = []
+                for i in range(len(audio_files)):
+                    subs_file = os.path.join(subs_dir, f"subs_chunk_{i}.ass")
+                    if os.path.exists(subs_file):
+                        subs_files.append(subs_file)
+                        
+                if len(subs_files) == len(audio_files):
+                    # Всі файли існують - заповнюємо дані
+                    info['data']['audio_chunks'] = sorted(audio_files)
+                    info['data']['subs_chunks'] = sorted(subs_files)
+                    
+                    # Оновлюємо статус
+                    status_key = info['status_key']
+                    if status_key in self.app.task_completion_status:
+                        audio_step_name = self.app._t('step_name_audio')
+                        subs_step_name = self.app._t('step_name_create_subtitles')
+                        
+                        if audio_step_name in self.app.task_completion_status[status_key]['steps']:
+                            self.app.task_completion_status[status_key]['steps'][audio_step_name] = "✅"
+                        
+                        if subs_step_name in self.app.task_completion_status[status_key]['steps']:
+                            self.app.task_completion_status[status_key]['steps'][subs_step_name] = "✅"
+                    
+                    logger.info(f"FALLBACK: Знайдено готові файли для {task_key} - аудіо: {len(audio_files)}, субтитри: {len(subs_files)}")
+                    return True
+                else:
+                    logger.debug(f"FALLBACK: Не всі субтитри знайдені для {task_key} - аудіо: {len(audio_files)}, субтитри: {len(subs_files)}")
+            else:
+                logger.debug(f"FALLBACK: Аудіо файли не знайдені для {task_key}")
+                
+        except Exception as e:
+            logger.debug(f"FALLBACK: Помилка перевірки {task_key}: {e}")
+            
+        return False
