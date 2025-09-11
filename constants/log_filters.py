@@ -27,7 +27,9 @@ TECHNICAL_MESSAGES = [
     "Video concatenation successful.",
     "Firebase -> Структура відповіді refresh(): ['userId', 'idToken', 'refreshToken']",
     "Found system-wide ffmpeg in PATH.",
-    "Firebase -> Помилка очищення Storage: 'Storage' object has no attribute 'bucket'"
+    "Firebase -> Помилка очищення Storage: 'Storage' object has no attribute 'bucket'",
+    "Speechify -> Тест успішний. Отримано JSON з ключем audio_data",
+    "Speechify -> Тестовий запит: відправка перевіреного українського пейлоаду на https://api.sws.speechify.com/v1/audio/speech"
 ]
 
 # Префікси повідомлень, які фільтруються з GUI
@@ -46,7 +48,8 @@ TECHNICAL_MESSAGE_PREFIXES = [
     "Firebase -> Очищення посилань на зображення з бази даних для користувача",
     "Firebase -> Очищення файлів зображень зі Storage для користувача",
     "Firebase -> Успішно відновлено сесію для User ID:",
-    "Firebase -> Очищення логів для користувача"
+    "Firebase -> Очищення логів для користувача",
+    "Firebase -> API успішно ініціалізовано для користувача:"
 ]
 
 # Додаткові префікси повідомлень, які не відправляються в Firebase (мобільний додаток), 

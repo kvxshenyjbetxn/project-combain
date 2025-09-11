@@ -178,7 +178,7 @@ class FirebaseAPI:
                 logger.error("Firebase -> Не знайдено токен для аутентифікації")
                 return
             self.db.child(self.logs_ref).push({'timestamp': timestamp, 'message': message}, token)
-            logger.debug(f"Firebase -> Лог успішно надіслано: {message}")
+            # Видалено технічне повідомлення, яке створювало цикл логування
         except Exception as e:
             logger.error(f"Firebase -> Помилка надсилання логу: {e}")
 
