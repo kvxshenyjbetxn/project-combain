@@ -44,6 +44,9 @@ class AudioWorkerPool:
         self.transcription_queue = queue.Queue()
         self.results = {}  # task_key -> {chunk_index: audio_path}
         self.completed_tasks = set()  # Завершені task_key
+        self.completed_audio_items = []  # Готові аудіо елементи для ElevenLabs
+        self.completed_audio_lock = threading.Lock()  # Lock для completed_audio_items
+        self.worker_column_mapping = {}  # worker_id -> column_number для GUI логів
         self.is_running = False
         self.shutdown_event = threading.Event()
         self.workers = []
@@ -55,6 +58,12 @@ class AudioWorkerPool:
             
         self.is_running = True
         self.shutdown_event.clear()
+        
+        # Створюємо мапінг worker_id до колонок для GUI
+        for i in range(self.max_workers):
+            column_num = i + 1
+            worker_id = f"Chunk {column_num}"
+            self.worker_column_mapping[worker_id] = column_num
         
         # Запускаємо аудіо воркери
         for i in range(self.max_workers):
@@ -99,6 +108,39 @@ class AudioWorkerPool:
         # Зупиняємо batch executor якщо існує
         if hasattr(self, 'batch_executor'):
             self.batch_executor.shutdown(wait=True, timeout=10)
+            
+        # ФІНАЛЬНА ПЕРЕВІРКА: обробляємо файли, що завершилися після зупинки
+        logger.info("Фінальна перевірка залишкових аудіо файлів для транскрипції...")
+        with self.completed_audio_lock:
+            remaining_items = len(self.completed_audio_items)
+            if remaining_items > 0:
+                logger.warning(f"Знайдено {remaining_items} необроблених аудіо файлів після зупинки воркерів")
+                
+                # Обробляємо кожен залишковий файл окремо
+                for item in list(self.completed_audio_items):
+                    logger.info(f"Фінальна обробка: {item.task_key} chunk {item.chunk_index}")
+                    self.queue_audio_for_transcription(
+                        audio_path=item.output_path,
+                        output_dir=os.path.dirname(item.output_path),
+                        chunk_index=item.chunk_index,
+                        lang_code=item.lang_code,
+                        task_key=item.task_key,
+                        is_merged_group=False
+                    )
+                    
+                # Запускаємо окремий транскрипційний воркер для обробки залишків
+                if not self.transcription_queue.empty():
+                    logger.info("Запуск фінального транскрипційного воркера...")
+                    final_worker = threading.Thread(
+                        target=self._final_transcription_worker,
+                        name="FinalTranscriptionWorker",
+                        daemon=False
+                    )
+                    final_worker.start()
+                    final_worker.join(timeout=60)  # Чекаємо максимум 1 хвилину
+                    
+                # Очищуємо список після обробки
+                self.completed_audio_items.clear()
             
         self.workers.clear()
         logger.info("AudioWorkerPool зупинено")
@@ -165,9 +207,11 @@ class AudioWorkerPool:
                 # Встановлюємо контекст для логування
                 if hasattr(self.app, 'log_context'):
                     self.app.log_context.parallel_task = f'Batch {tts_service.title()}'
-                    self.app.log_context.worker_id = f'Batch-{i+1}/{len(items)}'
+                    # Для batch використовуємо циклічний worker_id для розподілу по колонкам
+                    worker_column = (i % self.max_workers) + 1  
+                    self.app.log_context.worker_id = f'Chunk {worker_column}'
                 
-                logger.info(f"Batch: Відправка частини {i+1}/{len(items)} на {tts_service}")
+                logger.info(f"Batch-{tts_service}: Відправка {item.task_key} chunk {i}/{len(items)-1} на {tts_service.upper()} API (інтервал 1 сек)")
                 
                 # Запускаємо генерацію аудіо (неблокуюча)
                 future = self._start_audio_generation_async(item)
@@ -352,6 +396,10 @@ class AudioWorkerPool:
         
     def _audio_worker(self, worker_id: int):
         """Воркер для генерації аудіо."""
+        # Визначаємо GUI колонку для цього воркера
+        column_num = worker_id + 1
+        gui_worker_id = f"Chunk {column_num}"
+        
         logger.info(f"AudioWorker-{worker_id} запущено")
         
         while not self.shutdown_event.is_set():
@@ -372,7 +420,9 @@ class AudioWorkerPool:
                 # Встановлюємо контекст для логування
                 if hasattr(self.app, 'log_context'):
                     self.app.log_context.parallel_task = 'Audio Gen'
-                    self.app.log_context.worker_id = f'Worker-{worker_id}'
+                    self.app.log_context.worker_id = gui_worker_id  # Використовуємо консистентний GUI worker_id
+                
+                logger.info(f"AudioWorker-{worker_id}: ПОЧАТОК обробки {item.task_key} chunk {item.chunk_index}/{item.total_chunks-1} ({item.lang_config.get('tts_service', 'elevenlabs')})")
                 
                 # Генеруємо аудіо
                 success = self._generate_audio_chunk(item)
@@ -383,19 +433,19 @@ class AudioWorkerPool:
                         self.results[item.task_key] = {}
                     self.results[item.task_key][item.chunk_index] = item.output_path
                     
-                    # Додаємо до черги транскрипції
-                    trans_item = TranscriptionPipelineItem(
-                        audio_path=item.output_path,
-                        output_dir=os.path.dirname(item.output_path),
-                        chunk_index=item.chunk_index,
-                        lang_code=item.lang_code,
-                        task_key=item.task_key
-                    )
-                    self.transcription_queue.put(trans_item)
+                    # Для ElevenLabs додаємо до completed_audio_items для негайної обробки
+                    tts_service = item.lang_config.get("tts_service", "elevenlabs")
+                    if tts_service == "elevenlabs":
+                        with self.completed_audio_lock:
+                            self.completed_audio_items.append(item)
+                        logger.info(f"AudioWorker-{worker_id}: ElevenLabs {item.task_key} chunk {item.chunk_index} → completed_audio_items (негайна обробка)")
+                    else:
+                        # VoiceMaker/Speechify обробляються через batch систему
+                        logger.info(f"AudioWorker-{worker_id}: {tts_service} {item.task_key} chunk {item.chunk_index} → batch система")
                     
-                    logger.info(f"AudioWorker-{worker_id}: Завершено {item.task_key} chunk {item.chunk_index}")
+                    logger.info(f"AudioWorker-{worker_id}: ЗАВЕРШЕНО {item.task_key} chunk {item.chunk_index}")
                 else:
-                    logger.error(f"AudioWorker-{worker_id}: Помилка генерації {item.task_key} chunk {item.chunk_index}")
+                    logger.error(f"AudioWorker-{worker_id}: ПОМИЛКА генерації {item.task_key} chunk {item.chunk_index}")
                 
                 self.audio_queue.task_done()
                 
@@ -425,7 +475,7 @@ class AudioWorkerPool:
                     logger.info("TranscriptionWorker: Отримано сигнал зупинки")
                     break
                     
-                logger.info(f"TranscriptionWorker: Обробка {item.task_key} chunk {item.chunk_index}")
+                logger.info(f"TranscriptionWorker: ПОЧАТОК обробки {item.task_key} chunk {item.chunk_index} ({'група' if item.is_merged_group else 'частина'})")
                 
                 # Встановлюємо контекст для логування
                 if hasattr(self.app, 'log_context'):
@@ -444,11 +494,11 @@ class AudioWorkerPool:
                     # Перевіряємо чи всі частини транскрипції готові для цього завдання
                     if self._check_transcription_completion(item.task_key, transcription_results):
                         self.completed_tasks.add(item.task_key)
-                        logger.info(f"TranscriptionWorker: Завершено повну обробку {item.task_key}")
+                        logger.info(f"TranscriptionWorker: ЗАВЕРШЕНО повну обробку {item.task_key}")
                     
-                    logger.info(f"TranscriptionWorker: Завершено {item.task_key} chunk {item.chunk_index}")
+                    logger.info(f"TranscriptionWorker: ЗАВЕРШЕНО {item.task_key} chunk {item.chunk_index} ({'група' if item.is_merged_group else 'частина'})")
                 else:
-                    logger.error(f"TranscriptionWorker: Помилка транскрипції {item.task_key} chunk {item.chunk_index}")
+                    logger.error(f"TranscriptionWorker: ПОМИЛКА транскрипції {item.task_key} chunk {item.chunk_index}")
                 
                 self.transcription_queue.task_done()
                 
@@ -458,6 +508,43 @@ class AudioWorkerPool:
                 logger.exception(f"TranscriptionWorker: Критична помилка: {e}")
                 
         logger.info("TranscriptionWorker завершено")
+
+    def _final_transcription_worker(self):
+        """Фінальний транскрипційний воркер для обробки залишкових файлів."""
+        logger.info("FinalTranscriptionWorker запущено")
+        
+        while True:
+            try:
+                # Отримуємо завдання з черги
+                item = self.transcription_queue.get(timeout=5)  # Коротший timeout
+                
+                if item is None:  # Poison pill
+                    break
+                    
+                logger.info(f"FinalTranscriptionWorker: Обробка {item.task_key} chunk {item.chunk_index}")
+                
+                # Встановлюємо контекст для логування
+                if hasattr(self.app, 'log_context'):
+                    self.app.log_context.parallel_task = 'Transcription'
+                    self.app.log_context.worker_id = 'Final'
+                
+                # Генеруємо транскрипцію
+                subs_path = self._generate_transcription_chunk(item)
+                
+                if subs_path:
+                    # Додаємо завдання до завершених
+                    self.completed_tasks.add(item.task_key)
+                    logger.info(f"FinalTranscriptionWorker: ЗАВЕРШЕНО {item.task_key} chunk {item.chunk_index}")
+                else:
+                    logger.error(f"FinalTranscriptionWorker: ПОМИЛКА транскрипції {item.task_key} chunk {item.chunk_index}")
+                    
+            except queue.Empty:
+                # Черга порожня - завершуємо роботу
+                break
+            except Exception as e:
+                logger.exception(f"FinalTranscriptionWorker: ПОМИЛКА {e}")
+                
+        logger.info("FinalTranscriptionWorker завершено")
         
     def _generate_audio_chunk(self, item: AudioPipelineItem) -> bool:
         """Генерує аудіо файл для текстового фрагменту."""
@@ -568,8 +655,8 @@ class AudioWorkerPool:
             with self.completed_audio_lock:
                 for item in list(self.completed_audio_items):
                     self.queue_audio_for_transcription(
-                        audio_path=item.audio_path,
-                        output_dir=item.output_dir,
+                        audio_path=item.output_path,  # Виправлено: використовуємо output_path замість audio_path
+                        output_dir=os.path.dirname(item.output_path),  # Виправлено: отримуємо директорію з шляху
                         chunk_index=item.chunk_index,
                         lang_code=item.lang_code,
                         task_key=item.task_key,

@@ -336,12 +336,22 @@ class TranslationApp:
         self.firebase_api.listen_for_commands(self._handle_firebase_command)
 
     def _handle_firebase_command(self, event):
-        if self.is_shutting_down or event.path == "/" and event.data is None:
+        # Обробляємо як dict, так і об'єкти з атрибутами
+        if isinstance(event, dict):
+            event_path = event.get('path', '/')
+            event_data = event.get('data')
+            event_type = event.get('event', 'put')
+        else:
+            event_path = getattr(event, 'path', '/')
+            event_data = getattr(event, 'data', None)
+            event_type = getattr(event, 'event_type', 'put')
+            
+        if self.is_shutting_down or event_path == "/" and event_data is None:
             return
 
-        if event.event_type == 'put' and event.path != '/':
-            command_id = event.path.strip('/')
-            command_data = event.data
+        if event_type == 'put' and event_path != '/':
+            command_id = event_path.strip('/')
+            command_data = event_data
             
             # Кладемо команду в чергу
             self.command_queue.put((command_id, command_data))
