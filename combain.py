@@ -239,6 +239,10 @@ class TranslationApp:
         self.setup_gui()
         self.setup_global_bindings() 
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        
+        # Додаємо обробник зміни розміру вікна для автоматичного регулювання висоти черги
+        self.root.bind("<Configure>", self._on_window_resize)
+        
         self.populate_rewrite_template_widgets()
         self.display_saved_balances()
         self.refresh_widget_colors()
@@ -821,6 +825,76 @@ class TranslationApp:
                             step_text = f"    {emoji} {step_name}: {status_icon}"
                         
                         self.queue_tree.insert(lang_node, "end", text=step_text, values=("", ""))
+        
+        # Автоматично регулюємо висоту черги завдань
+        self._adjust_queue_height()
+        
+        # Прокручуємо до останнього завдання якщо є завдання
+        if self.task_queue:
+            last_task_id = f"task_{len(self.task_queue) - 1}"
+            if self.queue_tree.exists(last_task_id):
+                self.queue_tree.see(last_task_id)
+                # Також розгортаємо останнє завдання для кращого відображення
+                self.queue_tree.item(last_task_id, open=True)
+                for child in self.queue_tree.get_children(last_task_id):
+                    self.queue_tree.item(child, open=True)
+
+    def _adjust_queue_height(self):
+        """Автоматично регулює висоту Treeview для черги завдань"""
+        if not hasattr(self, 'queue_tree'):
+            return
+        
+        # Підраховуємо загальну кількість елементів у дереві (включаючи дочірні)
+        def count_tree_items(parent=""):
+            count = len(self.queue_tree.get_children(parent))
+            for child in self.queue_tree.get_children(parent):
+                count += count_tree_items(child)
+            return count
+        
+        total_items = count_tree_items()
+        
+        # Якщо черга порожня, все одно показуємо мінімальну кількість рядків
+        if total_items == 0:
+            total_items = 3  # Показуємо 3 порожні рядки
+        
+        # Встановлюємо параметри висоти
+        min_height = 5   # Мінімальна висота
+        
+        # Розраховуємо максимальну висоту на основі розміру вікна
+        try:
+            window_height = self.root.winfo_height()
+            # Максимум 40% від висоти вікна, але не менше 15 рядків і не більше 30
+            max_height_based_on_window = max(15, min(int(window_height * 0.4 / 20), 30))  # ~20px на рядок
+            max_height = max_height_based_on_window
+        except:
+            max_height = 25  # Значення за замовчуванням якщо не вдається отримати розмір вікна
+        
+        optimal_height = max(min_height, min(total_items + 2, max_height))  # +2 для буферу
+        
+        # Застосовуємо нову висоту
+        current_height = self.queue_tree.cget('height')
+        if current_height != optimal_height:
+            self.queue_tree.configure(height=optimal_height)
+            
+            # Зберігаємо нову висоту в конфігурації
+            if 'ui_settings' not in self.config:
+                self.config['ui_settings'] = {}
+            self.config['ui_settings']['queue_height'] = optimal_height
+            
+            # Оновлюємо скрол-регіон батьківського контейнера
+            if hasattr(self, 'update_scroll_functions'):
+                for update_func in self.update_scroll_functions:
+                    update_func()
+
+    def _on_window_resize(self, event):
+        """Обробник зміни розміру вікна"""
+        # Перевіряємо чи це подія зміни розміру основного вікна (а не дочірніх елементів)
+        if event.widget == self.root:
+            # Викликаємо регулювання висоти черги завдань з невеликою затримкою
+            # щоб уникнути занадто частих викликів під час зміни розміру
+            if hasattr(self, '_resize_timer'):
+                self.root.after_cancel(self._resize_timer)
+            self._resize_timer = self.root.after(500, self._adjust_queue_height)
 
     def _calculate_task_progress(self, task_index):
         """Розраховує загальний прогрес завдання у відсотках"""
@@ -911,6 +985,8 @@ class TranslationApp:
         try:
             # Оновлюємо відображення після короткої затримки, щоб уникнути зависання UI
             self.root.after(100, self.update_queue_display)
+            # Також оновлюємо висоту черги, якщо статус змінився
+            self.root.after(200, self._adjust_queue_height)
         except:
             pass  # Ігноруємо помилки, якщо GUI недоступний
 

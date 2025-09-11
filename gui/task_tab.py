@@ -247,7 +247,11 @@ def create_task_tab(notebook, app):
     queue_list_frame.pack(fill='both', expand=True, padx=10, pady=5)
     
     columns = ("status", "time")
-    app.queue_tree = ttk.Treeview(queue_list_frame, columns=columns, show='tree headings', height=10, bootstyle="dark")
+    app.queue_tree = ttk.Treeview(queue_list_frame, columns=columns, show='tree headings', bootstyle="dark")
+    
+    # Початкова висота - використовуємо збережену або мінімальну за замовчуванням
+    saved_height = app.config.get("ui_settings", {}).get("queue_height", 5)
+    app.queue_tree.configure(height=saved_height)
     
     style = ttk.Style()
     style.configure("Treeview.Heading", relief="groove", borderwidth=1, padding=(5,5))
