@@ -81,7 +81,23 @@ from utils import (
     refresh_user_stats,
     refresh_firebase_stats,
     clear_firebase_logs,
-    clear_firebase_images
+    clear_firebase_images,
+    update_elevenlabs_balance_labels,
+    test_elevenlabs_connection,
+    update_elevenlabs_info,
+    update_recraft_balance_labels,
+    test_recraft_connection,
+    update_recraft_substyles,
+    send_telegram_error_notification,
+    send_task_completion_report,
+    test_telegram_connection,
+    test_openrouter_connection,
+    populate_openrouter_widgets,
+    add_openrouter_model,
+    remove_openrouter_model,
+    test_pollinations_connection,
+    test_voicemaker_connection,
+    test_speechify_connection
 )
 
 from utils.settings_utils import save_settings as save_settings_util
@@ -483,18 +499,12 @@ class TranslationApp:
         self.root.destroy()
         
     def _update_elevenlabs_balance_labels(self, new_balance):
-        balance_text = new_balance if new_balance is not None else 'N/A'
-        self.root.after(0, lambda: self.settings_el_balance_label.config(text=f"{self._t('balance_label')}: {balance_text}"))
-        self.root.after(0, lambda: self.chain_el_balance_label.config(text=f"{self._t('elevenlabs_balance_label')}: {balance_text}"))
-        self.root.after(0, lambda: self.rewrite_el_balance_label.config(text=f"{self._t('elevenlabs_balance_label')}: {balance_text}"))
-        logger.info(f"Інтерфейс оновлено: баланс ElevenLabs тепер {balance_text}")
+        """Update ElevenLabs balance labels - delegates to utility function."""
+        update_elevenlabs_balance_labels(self, new_balance)
 
     def _update_recraft_balance_labels(self, new_balance):
-        balance_text = new_balance if new_balance is not None else 'N/A'
-        self.root.after(0, lambda: self.settings_recraft_balance_label.config(text=f"{self._t('balance_label')}: {balance_text}"))
-        self.root.after(0, lambda: self.chain_recraft_balance_label.config(text=f"{self._t('recraft_balance_label')}: {balance_text}"))
-        self.root.after(0, lambda: self.rewrite_recraft_balance_label.config(text=f"{self._t('recraft_balance_label')}: {balance_text}"))
-        logger.info(f"Інтерфейс оновлено: баланс Recraft тепер {balance_text}")
+        """Update Recraft balance labels - delegates to utility function."""
+        update_recraft_balance_labels(self, new_balance)
 
     def setup_global_bindings(self):
         mod_key = "Command" if sys.platform == "darwin" else "Control"
@@ -1103,78 +1113,12 @@ class TranslationApp:
             self.update_progress(progress_text, increment_step=True)
 
     def send_telegram_error_notification(self, task_name, lang_code, step, error_details):
-        """Негайно відправляє сповіщення про помилку."""
-        message = (
-            f"❌ *Виникла помилка під час виконання\\!* ❌\n\n"
-            f"*Завдання:* {self._escape_markdown(task_name)}\n"
-            f"*Мова:* {self._escape_markdown(lang_code.upper())}\n"
-            f"*Етап:* {self._escape_markdown(step)}\n"
-            f"*Помилка:* {self._escape_markdown(error_details)}"
-        )
-        self.tg_api.send_message_in_thread(message)
+        """Негайно відправляє сповіщення про помилку - delegates to utility function."""
+        send_telegram_error_notification(self, task_name, lang_code, step, error_details)
 
     def send_task_completion_report(self, task_config, single_lang_code=None):
-        """Формує та відправляє фінальний звіт по завершенню всього завдання або однієї мови."""
-        task_name = self._escape_markdown(task_config.get('task_name', 'Невідоме завдання'))
-        
-        langs_to_report = [single_lang_code] if single_lang_code else task_config['selected_langs']
-        
-        # Визначаємо заголовок
-        if single_lang_code:
-            escaped_lang_code = self._escape_markdown(single_lang_code.upper())
-            report_lines = [f"✅ *Завдання \"{task_name}\" для мови {escaped_lang_code} завершено\\!* ✅\n"]
-        else:
-            report_lines = [f"✅ *Завдання \"{task_name}\" повністю завершено\\!* ✅\n"]
-
-        task_key_prefix = f"{task_config['task_index']}_"
-
-        for lang_code in langs_to_report:
-            task_key = task_key_prefix + lang_code
-            status = self.task_completion_status.get(task_key)
-            if not status: continue
-
-            report_lines.append(self._escape_markdown(f"---"))
-            lang_flags = {"it": "🇮🇹", "ro": "🇷🇴", "ua": "🇺🇦", "en": "🇬🇧", "pl": "🇵🇱", "de": "🇩🇪", "fr": "🇫🇷", "es": "🇪🇸"}
-            flag = lang_flags.get(lang_code.lower(), "")
-            escaped_lang_code = self._escape_markdown(lang_code.upper())
-            report_lines.append(f"{flag} *Мова: {escaped_lang_code}*")
-            report_lines.append(self._escape_markdown(f"---"))
-
-            # Проходимо по ключах та значеннях правильно
-            for step_name, result_icon in status['steps'].items():
-                escaped_step_name = self._escape_markdown(step_name)
-                
-                # Спеціальна логіка для кроку генерації зображень
-                if step_name == self._t('step_name_gen_images'):
-                    images_generated = status.get("images_generated", 0)
-                    total_images = status.get("total_images", 0)
-                    count_text = self._escape_markdown(f"({images_generated}/{total_images} шт.)")
-                    
-                    # Визначаємо іконку на основі реальних даних, а не попередньо встановленої
-                    current_icon = result_icon
-                    if total_images > 0: # Якщо зображення планувались
-                        if images_generated == total_images:
-                            current_icon = "✅"
-                        elif images_generated > 0:
-                            current_icon = "⚠️" # Частково виконано
-                        else:
-                            current_icon = "❌"
-                    
-                    # Якщо крок був пропущений (total_images == 0), іконка залишиться "⚪️"
-                    if current_icon == "❌":
-                        report_lines.append(f"• {current_icon} ~{escaped_step_name}~ *{count_text}*")
-                    else:
-                        report_lines.append(f"• {current_icon} {escaped_step_name} *{count_text}*")
-                
-                elif result_icon == "❌":
-                    report_lines.append(f"• {result_icon} ~{escaped_step_name}~")
-                elif result_icon == "⚪️":
-                     skipped_text = self._escape_markdown("(пропущено)")
-                     report_lines.append(f"• {result_icon} {escaped_step_name} *{skipped_text}*")
-                else:
-                    report_lines.append(f"• {result_icon} {escaped_step_name}")
-        
-        self.tg_api.send_message_in_thread("\n".join(report_lines))
+        """Формує та відправляє фінальний звіт по завершенню всього завдання або однієї мови - delegates to utility function."""
+        send_task_completion_report(self, task_config, single_lang_code)
 
     def update_progress(self, text, increment_step=False):
         if increment_step:
@@ -1190,130 +1134,44 @@ class TranslationApp:
 
 # Test connection methods
     def test_openrouter_connection(self):
-        api_key = self.or_api_key_var.get()
-        temp_config = self.config.copy()
-        temp_config["openrouter"]["api_key"] = api_key
-        temp_api = OpenRouterAPI(temp_config)
-        success, message = temp_api.test_connection()
-        if success:
-            messagebox.showinfo(self._t('test_connection_title_or'), message)
-        else:
-            messagebox.showerror(self._t('test_connection_title_or'), message)
+        """Test OpenRouter connection - delegates to utility function."""
+        test_openrouter_connection(self)
 
     def test_pollinations_connection(self):
-        token = self.poll_token_var.get()
-        model = self.poll_model_var.get()
-        temp_config = self.config.copy()
-        temp_config["pollinations"]["token"] = token
-        temp_config["pollinations"]["model"] = model
-        temp_api = PollinationsAPI(temp_config, self)
-        success, message = temp_api.test_connection()
-        if success:
-            messagebox.showinfo(self._t('test_connection_title_poll'), message)
-        else:
-            messagebox.showerror(self._t('test_connection_title_poll'), message)
+        """Test Pollinations connection - delegates to utility function."""
+        test_pollinations_connection(self)
 
     def test_elevenlabs_connection(self):
-        api_key = self.el_api_key_var.get()
-        temp_config = self.config.copy()
-        temp_config["elevenlabs"]["api_key"] = api_key
-        temp_api = ElevenLabsAPI(temp_config)
-        success, message = temp_api.test_connection()
-        if success:
-            self.el_api = temp_api
-            balance_text = self.el_api.balance if self.el_api.balance is not None else 'N/A'
-            self.settings_el_balance_label.config(text=f"{self._t('balance_label')}: {balance_text}")
-            messagebox.showinfo(self._t('test_connection_title_el'), message)
-        else:
-            messagebox.showerror(self._t('test_connection_title_el'), message)
+        """Test ElevenLabs connection - delegates to utility function."""
+        test_elevenlabs_connection(self)
 
     def test_voicemaker_connection(self):
-        api_key = self.vm_api_key_var.get()
-        temp_config = {"voicemaker": {"api_key": api_key}}
-        temp_api = VoiceMakerAPI(temp_config)
-        balance = temp_api.get_balance()
-        if balance is not None:
-            if 'voicemaker' not in self.config: self.config['voicemaker'] = {}
-            self.config['voicemaker']['last_known_balance'] = balance
-            save_config(self.config)
-            vm_text = balance
-            self.root.after(0, lambda: self.settings_vm_balance_label.config(text=f"{self._t('balance_label')}: {vm_text}"))
-            self.root.after(0, lambda: self.chain_vm_balance_label.config(text=f"{self._t('voicemaker_balance_label')}: {vm_text}"))
-            self.root.after(0, lambda: self.rewrite_vm_balance_label.config(text=f"{self._t('voicemaker_balance_label')}: {vm_text}"))
-            message = f"З'єднання з Voicemaker успішне.\nЗалишилось символів: {balance}"
-            messagebox.showinfo(self._t('test_connection_title_vm'), message)
-        else:
-            message = "Не вдалося перевірити з'єднання або отримати баланс Voicemaker."
-            messagebox.showerror(self._t('test_connection_title_vm'), message)
+        """Test Voicemaker connection - delegates to utility function."""
+        test_voicemaker_connection(self)
 
     def test_recraft_connection(self):
-        api_key = self.recraft_api_key_var.get()
-        temp_config = {"recraft": {"api_key": api_key}}
-        temp_api = RecraftAPI(temp_config)
-        success, message = temp_api.test_connection()
-        if success:
-            messagebox.showinfo(self._t('test_connection_title_recraft'), message)
-        else:
-            messagebox.showerror(self._t('test_connection_title_recraft'), message)
+        """Test Recraft connection - delegates to utility function."""
+        test_recraft_connection(self)
 
     def test_telegram_connection(self):
-        api_key = self.tg_api_key_var.get()
-        temp_config = {"telegram": {"api_key": api_key}}
-        temp_api = TelegramAPI(temp_config)
-        success, message = temp_api.test_connection()
-        if success:
-            messagebox.showinfo(self._t('test_connection_title_tg'), message)
-        else:
-            messagebox.showerror(self._t('test_connection_title_tg'), message)
+        """Test Telegram connection - delegates to utility function."""
+        test_telegram_connection(self)
 
     def test_speechify_connection(self):
-        api_key = self.speechify_api_key_var.get()
-        temp_config = {"speechify": {"api_key": api_key}}
-        temp_api = SpeechifyAPI(temp_config)
-        success, message = temp_api.test_connection()
-        if success:
-            messagebox.showinfo(self._t('test_connection_title_speechify'), message)
-        else:
-            messagebox.showerror(self._t('test_connection_title_speechify'), message)
+        """Test Speechify connection - delegates to utility function."""
+        test_speechify_connection(self)
 
     def _update_recraft_substyles(self, event=None):
-        selected_model = self.recraft_model_var.get()
-        selected_style = self.recraft_style_var.get()
-        substyles = RECRAFT_SUBSTYLES.get(selected_model, {}).get(selected_style, [])
-        current_substyle = self.recraft_substyle_var.get()
-        self.recraft_substyle_combo['values'] = substyles
-        if not substyles:
-            self.recraft_substyle_var.set("")
-            self.recraft_substyle_combo.config(state="disabled")
-        else:
-            self.recraft_substyle_combo.config(state="readonly")
-            if current_substyle not in substyles:
-                self.recraft_substyle_var.set("")
+        """Update Recraft substyles - delegates to utility function."""
+        update_recraft_substyles(self, event)
 
     def save_settings(self):
         """Зберігає всі налаштування додатку через утиліту settings_utils."""
         save_settings_util(self)
 
     def update_elevenlabs_info(self, update_templates=True):
-        balance = self.el_api.update_balance()
-        balance_text = balance if balance is not None else 'N/A'
-        
-        # Безпечно оновлюємо GUI тільки якщо головний цикл активний
-        try:
-            self.root.after(0, lambda: self.settings_el_balance_label.config(text=f"{self._t('balance_label')}: {balance_text}"))
-            self.root.after(0, lambda: self.chain_el_balance_label.config(text=f"{self._t('elevenlabs_balance_label')}: {balance_text}"))
-            self.root.after(0, lambda: self.rewrite_el_balance_label.config(text=f"{self._t('elevenlabs_balance_label')}: {balance_text}"))
-        except RuntimeError:
-            # Ігноруємо помилки якщо головний цикл ще не готовий
-            pass
-        
-        templates_len = "N/A"
-        if update_templates:
-            templates = self.el_api.update_templates()
-            if templates:
-                templates_len = len(templates)
-        elif self.el_api.templates:
-            templates_len = len(self.el_api.templates)
+        """Update ElevenLabs API information - delegates to utility function."""
+        update_elevenlabs_info(self, update_templates)
 
     def update_api_balances(self):
         def update_thread():
@@ -1493,9 +1351,6 @@ class TranslationApp:
         # Очищуємо статус готовності до монтажу
         self.firebase_api.clear_montage_ready_status()
         
-        # Більше не ховаємо галерею. Вона залишиться видимою.
-        # Код для приховування видалено.
-        
         # Ховаємо лише саму кнопку "Продовжити", щоб уникнути повторних натискань
         if self.continue_button and self.continue_button.winfo_ismapped():
             self.continue_button.pack_forget()
@@ -1625,7 +1480,6 @@ class TranslationApp:
                     if new_url:
                         # Оновлюємо посилання та timestamp в базі даних
                         self.firebase_api.update_image_in_db(image_id_to_update, new_url)
-                # --- КІНЕЦЬ ОНОВЛЕННЯ ---
 
             else:
                 logger.error(f"Failed to regenerate image: {image_path}")
@@ -1806,37 +1660,16 @@ class TranslationApp:
             logger.error(f"Помилка оновлення кольорів віджетів: {e}")
 
     def populate_openrouter_widgets(self):
-        models = self.config["openrouter"].get("saved_models", [])
-        self.or_models_listbox.delete(0, tk.END)
-        for model in models:
-            self.or_models_listbox.insert(tk.END, model)
-        self.or_trans_model_combo['values'] = models
-        self.or_prompt_model_combo['values'] = models
-        self.or_cta_model_combo['values'] = models
-        self.or_rewrite_model_combo['values'] = models
+        """Populate OpenRouter widgets - delegates to utility function."""
+        populate_openrouter_widgets(self)
 
     def add_openrouter_model(self):
-        dialog = CustomAskStringDialog(self.root, self._t('add_model_title'), self._t('add_model_prompt'), self)
-        new_model = dialog.result
-        if new_model:
-            models = self.config["openrouter"].get("saved_models", [])
-            if new_model not in models:
-                models.append(new_model)
-                self.config["openrouter"]["saved_models"] = models
-                self.populate_openrouter_widgets()
-            else:
-                messagebox.showwarning(self._t('warning_title'), self._t('warning_model_exists'))
+        """Add OpenRouter model - delegates to utility function."""
+        add_openrouter_model(self)
 
     def remove_openrouter_model(self):
-        selected_indices = self.or_models_listbox.curselection()
-        if not selected_indices:
-            messagebox.showwarning(self._t('warning_title'), self._t('warning_select_model_to_remove'))
-            return
-        selected_model = self.or_models_listbox.get(selected_indices[0])
-        if messagebox.askyesno(self._t('confirm_title'), f"{self._t('confirm_remove_model')} '{selected_model}'?"):
-            self.or_models_listbox.delete(selected_indices[0])
-            self.config["openrouter"]["saved_models"] = list(self.or_models_listbox.get(0, tk.END))
-            self.populate_openrouter_widgets()
+        """Remove OpenRouter model - delegates to utility function."""
+        remove_openrouter_model(self)
 
     def populate_language_list(self):
         if hasattr(self, 'rewrite_templates_listbox'):
@@ -1930,7 +1763,7 @@ class TranslationApp:
         
         self.el_voice_frame = ttk.Frame(self.lang_details_frame)
         self.vm_voice_frame = ttk.Frame(self.lang_details_frame)
-        self.speechify_voice_frame = ttk.Frame(self.lang_details_frame) # <-- НОВЕ
+        self.speechify_voice_frame = ttk.Frame(self.lang_details_frame)
 
         # --- ElevenLabs Widgets ---
         ttk.Label(self.el_voice_frame, text=self._t('voice_template_label')).pack(anchor='w')
@@ -1996,13 +1829,13 @@ class TranslationApp:
         service = self.lang_tts_service_var.get()
         self.el_voice_frame.pack_forget()
         self.vm_voice_frame.pack_forget()
-        self.speechify_voice_frame.pack_forget() # <-- ДОДАНО
+        self.speechify_voice_frame.pack_forget()
         if service == 'elevenlabs':
             self.el_voice_frame.pack(fill='x', pady=5)
         elif service == 'voicemaker':
             self.vm_voice_frame.pack(fill='x', pady=5)
-        elif service == 'speechify': # <-- ДОДАНО
-            self.speechify_voice_frame.pack(fill='x', pady=5) # <-- ДОДАНО
+        elif service == 'speechify':
+            self.speechify_voice_frame.pack(fill='x', pady=5) 
 
     def update_language_details(self, code):
         if code in self.config["languages"]:
