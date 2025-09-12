@@ -37,6 +37,11 @@ class WorkflowManager:
         self.firebase_api = app_instance.firebase_api
         self.transcription_results_queue = queue.Queue()
         
+    def _get_status_key(self, task_idx, lang_code, is_rewrite=False):
+        """Helper функція для створення правильного ключа статусу"""
+        prefix = "rewrite_" if is_rewrite else ""
+        return f"{prefix}{task_idx}_{lang_code}"
+    
     def shutdown(self):
         """Зупиняє всі активні процеси WorkflowManager."""
         if hasattr(self, 'audio_worker_pool') and self.audio_worker_pool:
@@ -107,7 +112,8 @@ class WorkflowManager:
             for i, task in enumerate(queue_to_process):
                 task['task_index'] = i
                 for lang_code in task['selected_langs']:
-                    task_key = f"{i}_{lang_code}"
+                    # Додаємо префікс для рерайт черги
+                    task_key = f"rewrite_{i}_{lang_code}" if is_rewrite else f"{i}_{lang_code}"
                     self.app.task_completion_status[task_key] = {
                         "task_name": task.get('task_name'),
                         "steps": {self.app._t('step_name_' + step_name): "⚪️" for step_name, enabled in task['steps'][lang_code].items() if enabled},
@@ -160,12 +166,15 @@ class WorkflowManager:
                         task_idx_str = task['task_index']
                         step_name_key = self.app._t('step_name_transcribe')
                         for lang_code in task['selected_langs']:
-                            status_key = f"{task_idx_str}_{lang_code}"
+                            status_key = self._get_status_key(task_idx_str, lang_code, is_rewrite)
                             if status_key in self.app.task_completion_status and step_name_key in self.app.task_completion_status[status_key]['steps']:
                                 self.app.task_completion_status[status_key]['steps'][step_name_key] = "✅"
                 
                 # Оновлюємо відображення після завершення транскрипції
-                self.app.root.after(0, self.app.update_task_status_display)
+                if is_rewrite:
+                    self.app.root.after(0, self.app.update_rewrite_task_status_display)
+                else:
+                    self.app.root.after(0, self.app.update_task_status_display)
 
 
             # Phase 1: Parallel text processing
@@ -195,7 +204,7 @@ class WorkflowManager:
             # --- ОНОВЛЕНИЙ БЛОК ПІСЛЯ ОБРОБКИ ТЕКСТУ ---
             for task_key, data in processing_data.items():
                 task_idx_str, lang_code = task_key
-                status_key = f"{task_idx_str}_{lang_code}"
+                status_key = self._get_status_key(task_idx_str, lang_code, is_rewrite)
 
                 if status_key in self.app.task_completion_status:
                     if data.get('text_results'):
@@ -215,7 +224,10 @@ class WorkflowManager:
                             self.app.task_completion_status[status_key]['steps'][step_name] = "❌"
 
             # Оновлюємо відображення після завершення обробки тексту
-            self.app.root.after(0, self.app.update_task_status_display)
+            if is_rewrite:
+                self.app.root.after(0, self.app.update_rewrite_task_status_display)
+            else:
+                self.app.root.after(0, self.app.update_task_status_display)
 
 
             # --- ЕТАП 2: ОДНОЧАСНА ГЕНЕРАЦІЯ МЕДІА ---
@@ -230,7 +242,7 @@ class WorkflowManager:
             )
 
             if should_gen_images:
-                image_master_thread = threading.Thread(target=self._sequential_image_master, args=(processing_data, queue_to_process, queue_type))
+                image_master_thread = threading.Thread(target=self._sequential_image_master, args=(processing_data, queue_to_process, queue_type, is_rewrite))
                 image_master_thread.start()
             else:
                 image_master_thread = None
@@ -272,7 +284,7 @@ class WorkflowManager:
             for task_key, data in sorted(processing_data.items()):
                 lang_code = task_key[1]
                 task_idx_str = task_key[0]
-                status_key = f"{task_idx_str}_{lang_code}"
+                status_key = self._get_status_key(task_idx_str, lang_code, is_rewrite)
                 
                 if data.get('task') and data.get('text_results') and data['task']['steps'][lang_code].get('create_video'):
                     
@@ -305,7 +317,10 @@ class WorkflowManager:
                         step_name = self.app._t('step_name_create_video')
                         if step_name in self.app.task_completion_status[status_key]['steps']:
                             self.app.task_completion_status[status_key]['steps'][step_name] = "🔄"
-                            self.app.root.after(0, self.app.update_task_status_display)
+                            if is_rewrite:
+                                self.app.root.after(0, self.app.update_rewrite_task_status_display)
+                            else:
+                                self.app.root.after(0, self.app.update_task_status_display)
 
                     image_chunks = np.array_split(all_images, len(data['audio_chunks']))
                     
@@ -348,14 +363,20 @@ class WorkflowManager:
                             if status_key in self.app.task_completion_status:
                                 step_name = self.app._t('step_name_create_video')
                                 self.app.task_completion_status[status_key]['steps'][step_name] = "✅"
-                                self.app.root.after(0, self.app.update_task_status_display)
+                                if is_rewrite:
+                                    self.app.root.after(0, self.app.update_rewrite_task_status_display)
+                                else:
+                                    self.app.root.after(0, self.app.update_task_status_display)
                             if is_rewrite:
                                 self.app.save_processed_link(data['task']['original_filename'])
                         else:
                              if status_key in self.app.task_completion_status:
                                 step_name = self.app._t('step_name_create_video')
                                 self.app.task_completion_status[status_key]['steps'][step_name] = "❌"
-                                self.app.root.after(0, self.app.update_task_status_display)
+                                if is_rewrite:
+                                    self.app.root.after(0, self.app.update_rewrite_task_status_display)
+                                else:
+                                    self.app.root.after(0, self.app.update_task_status_display)
                     else:
                         logger.error(f"ПОМИЛКА: Не вдалося створити всі частини відео для завдання {task_key}.")
                         if status_key in self.app.task_completion_status:
@@ -411,6 +432,8 @@ class WorkflowManager:
             
             if hasattr(self.app, 'pause_resume_button'):
                  self.app.root.after(0, lambda: self.app.pause_resume_button.config(text=self.app._t('pause_button'), state="disabled"))
+            if hasattr(self.app, 'rewrite_pause_resume_button'):
+                 self.app.root.after(0, lambda: self.app.rewrite_pause_resume_button.config(text=self.app._t('pause_button'), state="disabled"))
             self.app.pause_event.set()
 
     def _text_processing_worker(self, task, lang_code):
@@ -565,16 +588,16 @@ class WorkflowManager:
             logger.exception(f"Error in rewrite text processing worker for {lang_code}: {e}")
             return None
 
-    def _sequential_image_master(self, processing_data, queue_to_process, queue_type):
+    def _sequential_image_master(self, processing_data, queue_to_process, queue_type, is_rewrite=False):
         """Головний потік, що керує послідовною генерацією всіх зображень."""
         logger.info("[Image Control] Image Master Thread: Starting sequential image generation.")
         for task_key, data in sorted(processing_data.items()):
             task_idx_str, lang_code = task_key
-            status_key = f"{task_idx_str}_{lang_code}"
+            status_key = self._get_status_key(task_idx_str, lang_code, is_rewrite)
             step_name = self.app._t('step_name_gen_images')
 
             if data.get('text_results') and data['task']['steps'][lang_code].get('gen_images'):
-                success = self._image_generation_worker(data, task_key, task_idx_str + 1, len(queue_to_process), queue_type)
+                success = self._image_generation_worker(data, task_key, task_idx_str + 1, len(queue_to_process), queue_type, is_rewrite)
                 if status_key in self.app.task_completion_status:
                     # Тепер ми перевіряємо, чи були згенеровані якісь зображення
                     if self.app.task_completion_status[status_key]["images_generated"] > 0:
@@ -588,18 +611,21 @@ class WorkflowManager:
 
         logger.info("[Image Control] Image Master Thread: All image generation tasks complete.")
 
-    def _image_generation_worker(self, data, task_key, task_num, total_tasks, queue_type):
+    def _image_generation_worker(self, data, task_key, task_num, total_tasks, queue_type, is_rewrite=False):
         prompts = data['text_results']['prompts']
         images_folder = data['text_results']['images_folder']
         lang_name = task_key[1].upper()
 
         # Встановлюємо статус "в процесі" для генерації зображень
-        status_key = f"{task_key[0]}_{task_key[1]}"
+        status_key = self._get_status_key(task_key[0], task_key[1], is_rewrite)
         if status_key in self.app.task_completion_status:
             step_name = self.app._t('step_name_gen_images')
             if step_name in self.app.task_completion_status[status_key]['steps']:
                 self.app.task_completion_status[status_key]['steps'][step_name] = "🔄"
-                self.app.root.after(0, self.app.update_task_status_display)
+                if is_rewrite:
+                    self.app.root.after(0, self.app.update_rewrite_task_status_display)
+                else:
+                    self.app.root.after(0, self.app.update_task_status_display)
 
         with self.app.image_api_lock:
             if self.app.active_image_api is None:
@@ -653,11 +679,14 @@ class WorkflowManager:
                     consecutive_failures = 0
                     self.app.image_prompts_map[image_path] = prompt
                     self.app.root.after(0, self.app._add_image_to_gallery, image_path, task_key)
-                    status_key = f"{task_key[0]}_{task_key[1]}"
+                    status_key = self._get_status_key(task_key[0], task_key[1], is_rewrite)
                     if status_key in self.app.task_completion_status:
                         self.app.task_completion_status[status_key]["images_generated"] += 1
                         # Оновлюємо відображення після кожного згенерованого зображення
-                        self.app.root.after(0, self.app.update_task_status_display)
+                        if is_rewrite:
+                            self.app.root.after(0, self.app.update_rewrite_task_status_display)
+                        else:
+                            self.app.root.after(0, self.app.update_task_status_display)
                 else:
                     logger.error(f"Alternate service [{alt_service.capitalize()}] also failed to generate image {i+1}.")
                     all_successful = False
@@ -689,11 +718,14 @@ class WorkflowManager:
                     
                     self.firebase_api.upload_and_add_image_in_thread(image_path, task_key, i, task_name, prompt, callback=save_mapping)
 
-                status_key = f"{task_key[0]}_{task_key[1]}"
+                status_key = self._get_status_key(task_key[0], task_key[1], is_rewrite)
                 if status_key in self.app.task_completion_status:
                     self.app.task_completion_status[status_key]["images_generated"] += 1
                     # Оновлюємо відображення після кожного згенерованого зображення  
-                    self.app.root.after(0, self.app.update_task_status_display)
+                    if is_rewrite:
+                        self.app.root.after(0, self.app.update_rewrite_task_status_display)
+                    else:
+                        self.app.root.after(0, self.app.update_task_status_display)
                 i += 1 
             else:
                 consecutive_failures += 1
@@ -739,13 +771,16 @@ class WorkflowManager:
                 i += 1
 
         # Встановлюємо фінальний статус для генерації зображень
-        status_key = f"{task_key[0]}_{task_key[1]}"
+        status_key = self._get_status_key(task_key[0], task_key[1], is_rewrite)
         if status_key in self.app.task_completion_status:
             step_name = self.app._t('step_name_gen_images')
             if step_name in self.app.task_completion_status[status_key]['steps']:
                 final_status = "✅" if all_successful else "❌"
                 self.app.task_completion_status[status_key]['steps'][step_name] = final_status
-                self.app.root.after(0, self.app.update_task_status_display)
+                if is_rewrite:
+                    self.app.root.after(0, self.app.update_rewrite_task_status_display)
+                else:
+                    self.app.root.after(0, self.app.update_task_status_display)
 
         return all_successful
 
@@ -757,7 +792,7 @@ class WorkflowManager:
         for task_key, data in processing_data.items():
             if data.get('text_results'):
                 task_idx_str, lang_code = task_key
-                status_key = f"{task_idx_str}_{lang_code}"
+                status_key = self._get_status_key(task_idx_str, lang_code, is_rewrite)
                 if status_key in self.app.task_completion_status:
                     # Встановлюємо статус "в процесі" для аудіо
                     audio_step = self.app._t('step_name_audio')
@@ -770,7 +805,10 @@ class WorkflowManager:
                         self.app.task_completion_status[status_key]['steps'][subs_step] = "🔄"
         
         # Оновлюємо відображення
-        self.app.root.after(0, self.app.update_task_status_display)
+        if is_rewrite:
+            self.app.root.after(0, self.app.update_rewrite_task_status_display)
+        else:
+            self.app.root.after(0, self.app.update_task_status_display)
         
         num_parallel_chunks = self.config.get('parallel_processing', {}).get('num_chunks', 3)
         self.audio_worker_pool = AudioWorkerPool(self.app, num_parallel_chunks)
@@ -931,7 +969,7 @@ class WorkflowManager:
                 
                 # Встановлюємо фінальний статус для аудіо та субтитрів
                 task_idx_str, lang_code = tk
-                status_key = f"{task_idx_str}_{lang_code}"
+                status_key = self._get_status_key(task_idx_str, lang_code, is_rewrite)
                 if status_key in self.app.task_completion_status:
                     # Перевіряємо чи всі аудіо та субтитри завершені успішно
                     has_audio = len(info['data'].get('audio_chunks', [])) > 0
@@ -948,7 +986,10 @@ class WorkflowManager:
                         self.app.task_completion_status[status_key]['steps'][subs_step] = "✅" if has_subs else "❌"
             
             # Оновлюємо відображення
-            self.app.root.after(0, self.app.update_task_status_display)
+            if is_rewrite:
+                self.app.root.after(0, self.app.update_rewrite_task_status_display)
+            else:
+                self.app.root.after(0, self.app.update_task_status_display)
 
         finally:
             if self.audio_worker_pool:

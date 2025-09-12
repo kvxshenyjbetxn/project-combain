@@ -875,7 +875,13 @@ class TranslationApp:
             # щоб уникнути занадто частих викликів під час зміни розміру
             if hasattr(self, '_resize_timer'):
                 self.root.after_cancel(self._resize_timer)
+            if hasattr(self, '_rewrite_resize_timer'):
+                self.root.after_cancel(self._rewrite_resize_timer)
+            
+            # Регулюємо висоту основної черги
             self._resize_timer = self.root.after(500, self._adjust_queue_height)
+            # Регулюємо висоту рерайт черги
+            self._rewrite_resize_timer = self.root.after(500, self._adjust_rewrite_queue_height)
 
     def _calculate_task_progress(self, task_index):
         """Розраховує загальний прогрес завдання у відсотках"""
@@ -980,6 +986,156 @@ class TranslationApp:
         except:
             pass  # Ігноруємо помилки, якщо GUI недоступний
 
+    def _calculate_rewrite_task_progress(self, task_index):
+        """Розраховує загальний прогрес завдання рерайт у відсотках"""
+        if not hasattr(self, 'task_completion_status'):
+            return 0
+        
+        task = self.rewrite_task_queue[task_index] if task_index < len(self.rewrite_task_queue) else None
+        if not task:
+            return 0
+        
+        total_steps = 0
+        completed_steps = 0
+        
+        for lang_code in task['selected_langs']:
+            status_key = f"rewrite_{task_index}_{lang_code}"
+            if status_key in self.task_completion_status:
+                for step_status in self.task_completion_status[status_key]['steps'].values():
+                    total_steps += 1
+                    if step_status == "✅":
+                        completed_steps += 1
+        
+        return int((completed_steps / total_steps * 100)) if total_steps > 0 else 0
+    
+    def _calculate_rewrite_language_progress(self, task_index, lang_code):
+        """Розраховує прогрес для конкретної мови рерайт у відсотках"""
+        if not hasattr(self, 'task_completion_status'):
+            return 0
+        
+        status_key = f"rewrite_{task_index}_{lang_code}"
+        if status_key not in self.task_completion_status:
+            return 0
+        
+        steps = self.task_completion_status[status_key]['steps']
+        total_steps = len(steps)
+        completed_steps = sum(1 for status in steps.values() if status == "✅")
+        
+        return int((completed_steps / total_steps * 100)) if total_steps > 0 else 0
+    
+    def _get_rewrite_step_status(self, task_index, lang_code, step_key):
+        """Отримує статус конкретного кроку рерайт у вигляді тексту"""
+        if not hasattr(self, 'task_completion_status'):
+            return ""
+        
+        status_key = f"rewrite_{task_index}_{lang_code}"
+        if status_key not in self.task_completion_status:
+            return ""
+        
+        # Спеціальна обробка для різних типів кроків рерайт
+        if step_key == 'gen_images':
+            # Для зображень показуємо прогрес
+            status_info = self.task_completion_status[status_key]
+            total_images = status_info.get('total_images', 0)
+            generated_images = status_info.get('images_generated', 0)
+            if total_images > 0:
+                return f"{generated_images}/{total_images}"
+            return ""
+        
+        elif step_key in ['download', 'transcribe', 'audio', 'create_subtitles', 'create_video']:
+            # Для файлових операцій показуємо прогрес
+            step_name = self._t(f'step_name_{step_key}')
+            if step_name in self.task_completion_status[status_key]['steps']:
+                status = self.task_completion_status[status_key]['steps'][step_name]
+                if status == "✅":
+                    return "Готово"
+                elif status == "❌":
+                    return "Помилка"
+                elif status == "🔄":
+                    return "В процесі"
+            return ""
+        
+        elif step_key in ['rewrite', 'cta', 'gen_prompts']:
+            # Для текстових операцій просто показуємо статус
+            step_name = self._t(f'step_name_{step_key}')
+            if step_name in self.task_completion_status[status_key]['steps']:
+                status = self.task_completion_status[status_key]['steps'][step_name]
+                if status == "✅":
+                    return "Готово"
+                elif status == "❌":
+                    return "Помилка"
+                elif status == "🔄":
+                    return "В процесі"
+            return ""
+        
+        return ""
+    
+    def _adjust_rewrite_queue_height(self):
+        """Автоматично регулює висоту Treeview для черги рерайт завдань"""
+        if not hasattr(self, 'rewrite_queue_tree'):
+            return
+        
+        # Підраховуємо загальну кількість елементів у дереві рерайт (включаючи дочірні)
+        def count_tree_items(parent=""):
+            count = len(self.rewrite_queue_tree.get_children(parent))
+            for child in self.rewrite_queue_tree.get_children(parent):
+                count += count_tree_items(child)
+            return count
+        
+        total_items = count_tree_items()
+        
+        # Якщо черга порожня, все одно показуємо мінімальну кількість рядків
+        if total_items == 0:
+            total_items = 3  # Показуємо 3 порожні рядки
+        
+        # Встановлюємо параметри висоти
+        min_height = 5   # Мінімальна висота
+        
+        # Розраховуємо максимальну висоту на основі розміру вікна
+        try:
+            window_height = self.root.winfo_height()
+            # Максимум 40% від висоти вікна, але не менше 15 рядків і не більше 30
+            max_height_based_on_window = max(15, min(int(window_height * 0.4 / 20), 30))  # ~20px на рядок
+            max_height = max_height_based_on_window
+        except:
+            max_height = 25  # Значення за замовчуванням якщо не вдається отримати розмір вікна
+        
+        optimal_height = max(min_height, min(total_items + 2, max_height))  # +2 для буферу
+        
+        # Застосовуємо нову висоту
+        current_height = self.rewrite_queue_tree.cget('height')
+        if current_height != optimal_height:
+            self.rewrite_queue_tree.configure(height=optimal_height)
+            
+            # Зберігаємо нову висоту в конфігурації
+            if 'ui_settings' not in self.config:
+                self.config['ui_settings'] = {}
+            self.config['ui_settings']['rewrite_queue_height'] = optimal_height
+            
+            # Оновлюємо скрол-регіон батьківського контейнера
+            if hasattr(self, 'update_scroll_functions'):
+                for update_func in self.update_scroll_functions:
+                    update_func()
+
+    def update_rewrite_task_status_display(self, task_index=None, lang_code=None, step_key=None, status=None):
+        """Оновлює статус конкретного кроку в черзі рерайт завдань"""
+        if not hasattr(self, 'rewrite_queue_tree'):
+            return
+        
+        # Якщо не вказано конкретне завдання, оновлюємо весь дисплей
+        if task_index is None:
+            self.update_rewrite_queue_display()
+            return
+        
+        # Знаходимо відповідний елемент в дереві та оновлюємо його
+        try:
+            # Оновлюємо відображення після короткої затримки, щоб уникнути зависання UI
+            self.root.after(100, self.update_rewrite_queue_display)
+            # Також оновлюємо висоту черги, якщо статус змінився
+            self.root.after(200, self._adjust_rewrite_queue_height)
+        except:
+            pass  # Ігноруємо помилки, якщо GUI недоступний
+
     def process_queue(self):
         if self.is_processing_queue:
             messagebox.showinfo(self._t('queue_title'), self._t('info_queue_processing'))
@@ -989,7 +1145,12 @@ class TranslationApp:
             return
         
         self.is_processing_queue = True
-        self.pause_resume_button.config(state="normal")
+        
+        # Активуємо кнопки паузи на обох вкладках
+        if hasattr(self, 'pause_resume_button'):
+            self.pause_resume_button.config(state="normal")
+        if hasattr(self, 'rewrite_pause_resume_button'):
+            self.rewrite_pause_resume_button.config(state="normal")
         
         # Запускаємо логіку через новий менеджер
         thread = threading.Thread(target=self.workflow_manager._process_hybrid_queue, args=(self.task_queue, 'main'))
@@ -1005,6 +1166,12 @@ class TranslationApp:
             return
         
         self.is_processing_rewrite_queue = True
+        
+        # Активуємо кнопки паузи на обох вкладках
+        if hasattr(self, 'pause_resume_button'):
+            self.pause_resume_button.config(state="normal")
+        if hasattr(self, 'rewrite_pause_resume_button'):
+            self.rewrite_pause_resume_button.config(state="normal")
         
         # Запускаємо логіку через новий менеджер
         thread = threading.Thread(target=self.workflow_manager._process_hybrid_queue, args=(self.rewrite_task_queue, 'rewrite'))
@@ -1506,11 +1673,21 @@ class TranslationApp:
     def toggle_pause_resume(self):
         if self.pause_event.is_set():
             self.pause_event.clear()
-            self.pause_resume_button.config(text=self._t('resume_button'))
+            # Оновлюємо кнопку на основній вкладці
+            if hasattr(self, 'pause_resume_button'):
+                self.pause_resume_button.config(text=self._t('resume_button'))
+            # Оновлюємо кнопку на вкладці рерайт
+            if hasattr(self, 'rewrite_pause_resume_button'):
+                self.rewrite_pause_resume_button.config(text=self._t('resume_button'))
             self.update_progress(self._t('status_pausing'))
             logger.info("Pause requested. The process will pause after the current step.")
         else:
-            self.pause_resume_button.config(text=self._t('pause_button'))
+            # Оновлюємо кнопку на основній вкладці
+            if hasattr(self, 'pause_resume_button'):
+                self.pause_resume_button.config(text=self._t('pause_button'))
+            # Оновлюємо кнопку на вкладці рерайт
+            if hasattr(self, 'rewrite_pause_resume_button'):
+                self.rewrite_pause_resume_button.config(text=self._t('pause_button'))
             self.update_progress(self._t('status_resuming'))
             self.pause_event.set()
             logger.info("Resuming process.")
@@ -2399,26 +2576,61 @@ class TranslationApp:
             messagebox.showinfo(self._t('queue_title'), self._t('info_no_new_files'))
 
     def update_rewrite_queue_display(self):
-        if not hasattr(self, 'rewrite_queue_tree'): return
+        if not hasattr(self, 'rewrite_queue_tree'):
+            return
         
         for item in self.rewrite_queue_tree.get_children():
             self.rewrite_queue_tree.delete(item)
-            
-        steps_map = {
-            'download': self._t('step_download'), 'transcribe': self._t('step_transcribe'),
-            'rewrite': self._t('step_rewrite'), 'cta': self._t('step_cta'), 
-            'gen_prompts': self._t('step_gen_prompts'), 'gen_images': self._t('step_gen_images'), 
-            'audio': self._t('step_audio'), 'create_subtitles': self._t('step_create_subtitles'),
-            'create_video': self._t('step_create_video')
-        }
 
         for i, task in enumerate(self.rewrite_task_queue):
             timestamp = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(task['timestamp']))
-            task_node = self.rewrite_queue_tree.insert("", "end", iid=f"task_{i}", text=task['task_name'], values=(self._t('status_pending'), timestamp), open=True)
+            task_name = task.get('task_name', f"{self._t('task_label')} {i+1}")
+            
+            # Розрахунок загального прогресу завдання для рерайт черги
+            total_progress = self._calculate_rewrite_task_progress(i)
+            progress_text = f"({total_progress}%)" if total_progress > 0 else ""
+            
+            task_node = self.rewrite_queue_tree.insert("", "end", iid=f"task_{i}", 
+                                             text=f"{task_name} {progress_text}", 
+                                             values=(self._t('status_pending'), timestamp), open=True)
+            
             for lang_code in task['selected_langs']:
-                lang_node = self.rewrite_queue_tree.insert(task_node, "end", text=f"  - {lang_code.upper()}", values=("", ""))
-                enabled_steps = [steps_map[key] for key, value in task['steps'][lang_code].items() if value]
-                self.rewrite_queue_tree.insert(lang_node, "end", text=f"    {self._t('steps_label')}: {', '.join(enabled_steps)}", values=("", ""))
+                # Розрахунок прогресу для конкретної мови в рерайт черзі
+                lang_progress = self._calculate_rewrite_language_progress(i, lang_code)
+                lang_progress_text = f"({lang_progress}%)" if lang_progress > 0 else ""
+                
+                lang_node = self.rewrite_queue_tree.insert(task_node, "end", 
+                                                 text=f"{lang_code.upper()} {lang_progress_text}", 
+                                                 values=("", ""), open=True)
+                
+                # Показуємо детальний прогрес кожного кроку для рерайт
+                for step_key, enabled in task['steps'][lang_code].items():
+                    if enabled:
+                        step_name = self._t(f'step_{step_key}')
+                        
+                        # Отримуємо статус кроку з task_completion_status для рерайт
+                        status_text = self._get_rewrite_step_status(i, lang_code, step_key)
+                        
+                        # Формуємо текст з вирівнюванням
+                        if status_text:
+                            step_text = f"{step_name}: {status_text}"
+                        else:
+                            step_text = step_name
+                        
+                        self.rewrite_queue_tree.insert(lang_node, "end", text=step_text, values=("", ""))
+        
+        # Автоматично регулюємо висоту черги рерайт завдань
+        self._adjust_rewrite_queue_height()
+        
+        # Прокручуємо до останнього завдання якщо є завдання
+        if self.rewrite_task_queue:
+            last_task_id = f"task_{len(self.rewrite_task_queue) - 1}"
+            if self.rewrite_queue_tree.exists(last_task_id):
+                self.rewrite_queue_tree.see(last_task_id)
+                # Також розгортаємо останнє завдання для кращого відображення
+                self.rewrite_queue_tree.item(last_task_id, open=True)
+                for child in self.rewrite_queue_tree.get_children(last_task_id):
+                    self.rewrite_queue_tree.item(child, open=True)
 
     def clear_rewrite_queue(self):
         if messagebox.askyesno(self._t('confirm_title'), self._t('confirm_clear_queue')):

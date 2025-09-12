@@ -174,9 +174,13 @@ def create_task_tab(notebook, app):
     
     ttk.Button(buttons_frame, text=app._t('add_to_queue_button'), command=app.add_to_queue, bootstyle="info").pack(side='left', padx=5)
     
-    # Add Clear Gallery button
-    if hasattr(app, 'firebase_api') and app.firebase_api.is_initialized:
-        ttk.Button(buttons_frame, text="Clear Gallery", command=app.clear_gallery_manually, bootstyle="warning-outline").pack(side='left', padx=5)
+    # Переносимо кнопки управління чергою на рівень з "Додати в чергу"
+    ttk.Button(buttons_frame, text=app._t('process_queue_button'), command=app.process_queue, bootstyle="success").pack(side='left', padx=5)
+    
+    app.pause_resume_button = ttk.Button(buttons_frame, text=app._t('pause_button'), command=app.toggle_pause_resume, bootstyle="warning", state="disabled")
+    app.pause_resume_button.pack(side='left', padx=5)
+    
+    ttk.Button(buttons_frame, text=app._t('clear_queue_button'), command=app.clear_queue, bootstyle="danger").pack(side='left', padx=5)
     
     app.progress_var = tk.DoubleVar()
     app.progress_bar = ttk.Progressbar(app.chain_scrollable_frame, variable=app.progress_var, maximum=100, bootstyle="success-striped")
@@ -233,15 +237,7 @@ def create_task_tab(notebook, app):
     queue_main_frame = ttk.Labelframe(app.chain_scrollable_frame, text=app._t('task_queue_tab'))
     queue_main_frame.pack(fill='x', expand=True, padx=10, pady=10)
 
-    queue_control_frame = ttk.Frame(queue_main_frame)
-    queue_control_frame.pack(fill='x', padx=10, pady=5)
-    
-    ttk.Button(queue_control_frame, text=app._t('process_queue_button'), command=app.process_queue, bootstyle="success").pack(side='left', padx=5)
-    
-    app.pause_resume_button = ttk.Button(queue_control_frame, text=app._t('pause_button'), command=app.toggle_pause_resume, bootstyle="warning", state="disabled")
-    app.pause_resume_button.pack(side='left', padx=5)
-    
-    ttk.Button(queue_control_frame, text=app._t('clear_queue_button'), command=app.clear_queue, bootstyle="danger").pack(side='left', padx=5)
+
     
     queue_list_frame = ttk.Frame(queue_main_frame)
     queue_list_frame.pack(fill='both', expand=True, padx=10, pady=5)
