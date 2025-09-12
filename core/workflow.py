@@ -323,6 +323,16 @@ class WorkflowManager:
             # --- ЕТАП 3: ОПЦІОНАЛЬНА ПАУЗА ---
             if self.config.get("ui_settings", {}).get("image_control_enabled", False):
                 self.app.update_progress(self.app._t('phase_3_image_control'), increment_step=True, queue_type=queue_type)
+                
+                def show_pause_notification():
+                    messagebox.showinfo(
+                        "Процес призупинено",
+                        "Всі підготовчі етапи завершено!\n\n"
+                        "Будь ласка, перегляньте галерею зображень та внесіть правки.\n\n"
+                        "Натисніть 'Продовжити монтаж', щоб зібрати фінальні відео."
+                    )
+                self.app.root.after(0, show_pause_notification)
+
                 if should_gen_images:
                     logger.info("Гібридний режим -> Етап 3: Пауза для налаштування зображень користувачем.")
                     message_text = "🎨 *Контроль зображень*\n\nВсі зображення згенеровано\\. Будь ласка, перегляньте та відредагуйте їх у програмі, перш ніж продовжити монтаж\\."
@@ -402,78 +412,77 @@ class WorkflowManager:
                     if status_key in self.app.task_completion_status:
                         step_name = self.app._t('step_name_create_video')
                         self.app.task_completion_status[status_key]['steps'][step_name] = "Помилка"
-                    continue
 
-                    # Встановлюємо статус "в процесі" для створення відео
-                    if status_key in self.app.task_completion_status:
-                        step_name = self.app._t('step_name_create_video')
-                        if step_name in self.app.task_completion_status[status_key]['steps']:
-                            self.app.task_completion_status[status_key]['steps'][step_name] = "В процесі"
+                # Встановлюємо статус "в процесі" для створення відео
+                if status_key in self.app.task_completion_status:
+                    step_name = self.app._t('step_name_create_video')
+                    if step_name in self.app.task_completion_status[status_key]['steps']:
+                        self.app.task_completion_status[status_key]['steps'][step_name] = "В процесі"
+                        if is_rewrite:
+                            self.app.root.after(0, self.app.update_rewrite_task_status_display)
+                        else:
+                            self.app.root.after(0, self.app.update_task_status_display)
+
+                image_chunks = np.array_split(all_images, len(data['audio_chunks']))
+                
+                video_chunk_paths = []
+                num_montage_threads = self.config.get('parallel_processing', {}).get('num_chunks', 3)
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=num_montage_threads) as executor:
+                    video_futures = {
+                        executor.submit(
+                            self._video_chunk_worker, 
+                            self.app,
+                            list(image_chunks[i]), 
+                            data['audio_chunks'][i], 
+                            data['subs_chunks'][i],
+                            os.path.join(data['temp_dir'], f"video_chunk_{i:02d}.mp4"),  # zfill для правильного сортування
+                            i + 1, len(data['audio_chunks'])
+                        ): i for i in range(len(data['audio_chunks']))
+                    }
+                    
+                    # Збираємо результати з правильним індексом для гарантованого порядку
+                    video_results = {}
+                    for f in concurrent.futures.as_completed(video_futures):
+                        chunk_index = video_futures[f]
+                        result = f.result()
+                        if result: 
+                            video_results[chunk_index] = result
+                            
+                    # Формуємо список в правильному хронологічному порядку
+                    video_chunk_paths = [video_results[i] for i in range(len(data['audio_chunks'])) if i in video_results]
+
+                if len(video_chunk_paths) == len(data['audio_chunks']):
+                    if 'video_title' in data['text_results']:
+                        base_name = sanitize_filename(data['text_results']['video_title'])
+                    else:
+                        base_name = sanitize_filename(data['text_results'].get('task_name', f"Task_{task_key[0]}"))
+                    
+                    final_video_path = os.path.join(data['text_results']['output_path'], f"video_{base_name}_{lang_code}.mp4")
+                    if self._concatenate_videos(self.app, video_chunk_paths, final_video_path):  # Вже в правильному порядку
+                        logger.info(f"УСПІХ: Створено фінальне відео: {final_video_path}")
+                        if status_key in self.app.task_completion_status:
+                            step_name = self.app._t('step_name_create_video')
+                            self.app.task_completion_status[status_key]['steps'][step_name] = "Готово"
                             if is_rewrite:
                                 self.app.root.after(0, self.app.update_rewrite_task_status_display)
                             else:
                                 self.app.root.after(0, self.app.update_task_status_display)
-
-                    image_chunks = np.array_split(all_images, len(data['audio_chunks']))
-                    
-                    video_chunk_paths = []
-                    num_montage_threads = self.config.get('parallel_processing', {}).get('num_chunks', 3)
-
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=num_montage_threads) as executor:
-                        video_futures = {
-                            executor.submit(
-                                self._video_chunk_worker, 
-                                self.app,
-                                list(image_chunks[i]), 
-                                data['audio_chunks'][i], 
-                                data['subs_chunks'][i],
-                                os.path.join(data['temp_dir'], f"video_chunk_{i:02d}.mp4"),  # zfill для правильного сортування
-                                i + 1, len(data['audio_chunks'])
-                            ): i for i in range(len(data['audio_chunks']))
-                        }
-                        
-                        # Збираємо результати з правильним індексом для гарантованого порядку
-                        video_results = {}
-                        for f in concurrent.futures.as_completed(video_futures):
-                            chunk_index = video_futures[f]
-                            result = f.result()
-                            if result: 
-                                video_results[chunk_index] = result
-                                
-                        # Формуємо список в правильному хронологічному порядку
-                        video_chunk_paths = [video_results[i] for i in range(len(data['audio_chunks'])) if i in video_results]
-
-                    if len(video_chunk_paths) == len(data['audio_chunks']):
-                        if 'video_title' in data['text_results']:
-                            base_name = sanitize_filename(data['text_results']['video_title'])
-                        else:
-                            base_name = sanitize_filename(data['text_results'].get('task_name', f"Task_{task_key[0]}"))
-                        
-                        final_video_path = os.path.join(data['text_results']['output_path'], f"video_{base_name}_{lang_code}.mp4")
-                        if self._concatenate_videos(self.app, video_chunk_paths, final_video_path):  # Вже в правильному порядку
-                            logger.info(f"УСПІХ: Створено фінальне відео: {final_video_path}")
-                            if status_key in self.app.task_completion_status:
-                                step_name = self.app._t('step_name_create_video')
-                                self.app.task_completion_status[status_key]['steps'][step_name] = "Готово"
-                                if is_rewrite:
-                                    self.app.root.after(0, self.app.update_rewrite_task_status_display)
-                                else:
-                                    self.app.root.after(0, self.app.update_task_status_display)
-                            if is_rewrite:
-                                self.app.save_processed_link(data['task']['original_filename'])
-                        else:
-                             if status_key in self.app.task_completion_status:
-                                step_name = self.app._t('step_name_create_video')
-                                self.app.task_completion_status[status_key]['steps'][step_name] = "Помилка"
-                                if is_rewrite:
-                                    self.app.root.after(0, self.app.update_rewrite_task_status_display)
-                                else:
-                                    self.app.root.after(0, self.app.update_task_status_display)
+                        if is_rewrite:
+                            self.app.save_processed_link(data['task']['original_filename'])
                     else:
-                        logger.error(f"ПОМИЛКА: Не вдалося створити всі частини відео для завдання {task_key}.")
-                        if status_key in self.app.task_completion_status:
+                         if status_key in self.app.task_completion_status:
                             step_name = self.app._t('step_name_create_video')
                             self.app.task_completion_status[status_key]['steps'][step_name] = "Помилка"
+                            if is_rewrite:
+                                self.app.root.after(0, self.app.update_rewrite_task_status_display)
+                            else:
+                                self.app.root.after(0, self.app.update_task_status_display)
+                else:
+                    logger.error(f"ПОМИЛКА: Не вдалося створити всі частини відео для завдання {task_key}.")
+                    if status_key in self.app.task_completion_status:
+                        step_name = self.app._t('step_name_create_video')
+                        self.app.task_completion_status[status_key]['steps'][step_name] = "Помилка"
                 
                 # Відправка звіту після завершення обробки однієї мови
                 report_timing = self.config.get("telegram", {}).get("report_timing", "per_task")
