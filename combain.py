@@ -939,30 +939,52 @@ class TranslationApp:
                 return f"{generated_images}/{total_images}"
             return ""
         
-        elif step_key in ['audio', 'create_subtitles', 'create_video']:
-            # Для аудіо, субтитрів і відео показуємо прогрес файлів
+        elif step_key == 'audio':
+            # Для аудіо показуємо прогрес у форматі "3/3"
+            status_info = self.task_completion_status[status_key]
+            total_audio = status_info.get('total_audio', 0)
+            generated_audio = status_info.get('audio_generated', 0)
             step_name = self._t(f'step_name_{step_key}')
             if step_name in self.task_completion_status[status_key]['steps']:
                 status = self.task_completion_status[status_key]['steps'][step_name]
-                if status == "✅":
+                if status == "В процесі" and total_audio > 0:
+                    return f"{generated_audio}/{total_audio}"
+                elif status == "Готово":
                     return "Готово"
-                elif status == "❌":
+                elif status == "Помилка":
                     return "Помилка"
-                elif status == "🔄":
-                    return "В процесі"
             return ""
         
-        elif step_key in ['translate', 'cta', 'gen_prompts']:
+        elif step_key == 'create_subtitles':
+            # Для субтитрів показуємо прогрес у форматі "2/3" (прив'язано до аудіо)
+            status_info = self.task_completion_status[status_key]
+            total_subs = status_info.get('total_subs', 0)
+            generated_subs = status_info.get('subs_generated', 0)
+            step_name = self._t(f'step_name_{step_key}')
+            if step_name in self.task_completion_status[status_key]['steps']:
+                status = self.task_completion_status[status_key]['steps'][step_name]
+                if status == "В процесі" and total_subs > 0:
+                    return f"{generated_subs}/{total_subs}"
+                elif status == "Готово":
+                    return "Готово"
+                elif status == "Помилка":
+                    return "Помилка"
+            return ""
+        
+        elif step_key in ['create_video']:
+            # Для відео показуємо прогрес файлів
+            step_name = self._t(f'step_name_{step_key}')
+            if step_name in self.task_completion_status[status_key]['steps']:
+                status = self.task_completion_status[status_key]['steps'][step_name]
+                return status  # Повертаємо статус як є (Готово, Помилка, В процесі)
+            return ""
+        
+        elif step_key in ['translate', 'gen_text', 'cta', 'gen_prompts']:
             # Для перекладу та генерації просто показуємо статус
             step_name = self._t(f'step_name_{step_key}')
             if step_name in self.task_completion_status[status_key]['steps']:
                 status = self.task_completion_status[status_key]['steps'][step_name]
-                if status == "✅":
-                    return "Готово"
-                elif status == "❌":
-                    return "Помилка"
-                elif status == "🔄":
-                    return "В процесі"
+                return status  # Повертаємо статус як є (Готово, Помилка, В процесі)
             return ""
         
         return ""
@@ -1042,30 +1064,68 @@ class TranslationApp:
                 return f"{generated_images}/{total_images}"
             return ""
         
-        elif step_key in ['download', 'transcribe', 'audio', 'create_subtitles', 'create_video']:
-            # Для файлових операцій показуємо прогрес
+        elif step_key == 'transcribe':
+            # Для транскрипції показуємо прогрес у форматі "3/5"
+            status_info = self.task_completion_status[status_key]
+            total_files = status_info.get('total_files', 0)
+            transcribed_files = status_info.get('transcribed_files', 0)
             step_name = self._t(f'step_name_{step_key}')
             if step_name in self.task_completion_status[status_key]['steps']:
                 status = self.task_completion_status[status_key]['steps'][step_name]
-                if status == "✅":
+                if status == "В процесі" and total_files > 0:
+                    return f"{transcribed_files}/{total_files}"
+                elif status == "Готово":
                     return "Готово"
-                elif status == "❌":
+                elif status == "Помилка":
                     return "Помилка"
-                elif status == "🔄":
-                    return "В процесі"
             return ""
         
-        elif step_key in ['rewrite', 'cta', 'gen_prompts']:
+        elif step_key == 'audio':
+            # Для аудіо показуємо прогрес у форматі "3/3"
+            status_info = self.task_completion_status[status_key]
+            total_audio = status_info.get('total_audio', 0)
+            generated_audio = status_info.get('audio_generated', 0)
+            step_name = self._t(f'step_name_{step_key}')
+            if step_name in self.task_completion_status[status_key]['steps']:
+                status = self.task_completion_status[status_key]['steps'][step_name]
+                if status == "В процесі" and total_audio > 0:
+                    return f"{generated_audio}/{total_audio}"
+                elif status == "Готово":
+                    return "Готово"
+                elif status == "Помилка":
+                    return "Помилка"
+            return ""
+        
+        elif step_key == 'create_subtitles':
+            # Для субтитрів показуємо прогрес у форматі "2/3" (прив'язано до аудіо)
+            status_info = self.task_completion_status[status_key]
+            total_subs = status_info.get('total_subs', 0)
+            generated_subs = status_info.get('subs_generated', 0)
+            step_name = self._t(f'step_name_{step_key}')
+            if step_name in self.task_completion_status[status_key]['steps']:
+                status = self.task_completion_status[status_key]['steps'][step_name]
+                if status == "В процесі" and total_subs > 0:
+                    return f"{generated_subs}/{total_subs}"
+                elif status == "Готово":
+                    return "Готово"
+                elif status == "Помилка":
+                    return "Помилка"
+            return ""
+        
+        elif step_key in ['download', 'create_video']:
+            # Для інших файлових операцій показуємо прогрес
+            step_name = self._t(f'step_name_{step_key}')
+            if step_name in self.task_completion_status[status_key]['steps']:
+                status = self.task_completion_status[status_key]['steps'][step_name]
+                return status  # Повертаємо статус як є (Готово, Помилка, В процесі)
+            return ""
+        
+        elif step_key in ['rewrite_text', 'gen_text', 'cta', 'gen_prompts']:
             # Для текстових операцій просто показуємо статус
             step_name = self._t(f'step_name_{step_key}')
             if step_name in self.task_completion_status[status_key]['steps']:
                 status = self.task_completion_status[status_key]['steps'][step_name]
-                if status == "✅":
-                    return "Готово"
-                elif status == "❌":
-                    return "Помилка"
-                elif status == "🔄":
-                    return "В процесі"
+                return status  # Повертаємо статус як є (Готово, Помилка, В процесі)
             return ""
         
         return ""
@@ -1804,10 +1864,11 @@ class TranslationApp:
         logger.info("Continue button pressed. Resuming final video processing. Gallery remains visible.")
         
         # Очищуємо статус готовності до монтажу
-        self.firebase_api.clear_montage_ready_status()
+        if self.firebase_api and self.firebase_api.is_initialized:
+            self.firebase_api.clear_montage_ready_status()
         
         # Ховаємо лише саму кнопку "Продовжити", щоб уникнути повторних натискань
-        if self.continue_button and self.continue_button.winfo_ismapped():
+        if hasattr(self, 'continue_button') and self.continue_button and self.continue_button.winfo_ismapped():
             self.continue_button.pack_forget()
             
         self.image_control_active.set() # Знімає блокування з потоку обробки
@@ -1817,17 +1878,19 @@ class TranslationApp:
         logger.info("Продовження монтажу з мобільного додатку.")
         
         # Очищуємо статус готовності до монтажу
-        self.firebase_api.clear_montage_ready_status()
+        if self.firebase_api and self.firebase_api.is_initialized:
+            self.firebase_api.clear_montage_ready_status()
         
         # Ховаємо кнопку "Продовжити", якщо вона є
-        if self.continue_button and self.continue_button.winfo_ismapped():
+        if hasattr(self, 'continue_button') and self.continue_button and self.continue_button.winfo_ismapped():
             self.continue_button.pack_forget()
             
         # Знімаємо блокування з потоку обробки (так само як і в desktop версії)
         self.image_control_active.set()
         
         # Надсилаємо лог про продовження монтажу
-        self.firebase_api.send_log_in_thread("✅ Монтаж продовжено з мобільного додатку")
+        if self.firebase_api and self.firebase_api.is_initialized:
+            self.firebase_api.send_log_in_thread("✅ Монтаж продовжено з мобільного додатку")
 
     def _delete_image(self, image_path):
         """Видаляє зображення з диску та з галереї."""

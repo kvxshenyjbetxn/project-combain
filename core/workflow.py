@@ -74,6 +74,9 @@ class WorkflowManager:
 
         self.app._update_button_states(is_processing=True, is_image_stuck=False)
         
+        # Очищуємо event для контролю зображень на початку обробки
+        self.app.image_control_active.clear()
+        
         # Підрахунок загальної кількості кроків для прогрес-бару
         self.app.current_queue_step = 0
         
@@ -116,7 +119,7 @@ class WorkflowManager:
                     task_key = f"rewrite_{i}_{lang_code}" if is_rewrite else f"{i}_{lang_code}"
                     self.app.task_completion_status[task_key] = {
                         "task_name": task.get('task_name'),
-                        "steps": {self.app._t('step_name_' + step_name): "⚪️" for step_name, enabled in task['steps'][lang_code].items() if enabled},
+                        "steps": {self.app._t('step_name_' + step_name): "Очікує" for step_name, enabled in task['steps'][lang_code].items() if enabled},
                         "images_generated": 0, # Лічильник успішних зображень
                         "total_images": 0      # Загальна кількість зображень для генерації
                     }
@@ -127,6 +130,35 @@ class WorkflowManager:
             if is_rewrite:
                 self.app.update_progress(self.app._t('phase_0_transcription'), increment_step=True, queue_type=queue_type)
                 logger.info("Hybrid mode -> Phase 0: Sequential transcription of local files.")
+                
+                # Встановлюємо статус "в процесі" для транскрипції всіх завдань
+                step_name_key = self.app._t('step_name_transcribe')
+                for task_index, task in enumerate(queue_to_process):
+                    for lang_code in task['selected_langs']:
+                        status_key = self._get_status_key(task_index, lang_code, is_rewrite)
+                        if status_key in self.app.task_completion_status:
+                            # Встановлюємо статус транскрипції
+                            if step_name_key in self.app.task_completion_status[status_key]['steps']:
+                                self.app.task_completion_status[status_key]['steps'][step_name_key] = "В процесі"
+                            
+                            # Ініціалізуємо всі інші кроки як "Очікує" якщо вони не встановлені
+                            for step_name, step_status in self.app.task_completion_status[status_key]['steps'].items():
+                                if step_status == "Очікує" and step_name != step_name_key:
+                                    # Залишаємо як "Очікує", але оновлюємо відображення
+                                    pass
+                
+                # Ініціалізуємо лічільники для транскрипції рерайту
+                unique_files = set(task['mp3_path'] for task in queue_to_process)
+                total_files_count = len(unique_files)
+                for task_index, task in enumerate(queue_to_process):
+                    for lang_code in task['selected_langs']:
+                        status_key = self._get_status_key(task_index, lang_code, is_rewrite)
+                        if status_key in self.app.task_completion_status:
+                            self.app.task_completion_status[status_key]['total_files'] = total_files_count
+                            self.app.task_completion_status[status_key]['transcribed_files'] = 0
+                
+                # Оновлюємо відображення
+                self.app.root.after(0, self.app.update_rewrite_task_status_display)
                 
                 transcribed_texts = {}
                 rewrite_base_dir = self.config['output_settings']['rewrite_default_dir']
@@ -156,6 +188,18 @@ class WorkflowManager:
                                 f.write(transcribed_text)
 
                         transcribed_texts[mp3_path] = {"text": transcribed_text, "title": video_title}
+                        
+                        # Оновлюємо лічільник транскрибованих файлів для всіх завдань з цим файлом
+                        for task_check in queue_to_process:
+                            if task_check['mp3_path'] == mp3_path:
+                                task_idx_check = task_check['task_index']
+                                for lang_code_check in task_check['selected_langs']:
+                                    status_key_check = self._get_status_key(task_idx_check, lang_code_check, is_rewrite)
+                                    if status_key_check in self.app.task_completion_status:
+                                        self.app.task_completion_status[status_key_check]['transcribed_files'] += 1
+                        
+                        # Оновлюємо відображення після кожного файлу
+                        self.app.root.after(0, self.app.update_rewrite_task_status_display)
 
                 for task in queue_to_process:
                     if task['mp3_path'] in transcribed_texts:
@@ -168,7 +212,7 @@ class WorkflowManager:
                         for lang_code in task['selected_langs']:
                             status_key = self._get_status_key(task_idx_str, lang_code, is_rewrite)
                             if status_key in self.app.task_completion_status and step_name_key in self.app.task_completion_status[status_key]['steps']:
-                                self.app.task_completion_status[status_key]['steps'][step_name_key] = "✅"
+                                self.app.task_completion_status[status_key]['steps'][step_name_key] = "Готово"
                 
                 # Оновлюємо відображення після завершення транскрипції
                 if is_rewrite:
@@ -180,6 +224,22 @@ class WorkflowManager:
             # Phase 1: Parallel text processing
             self.app.update_progress(self.app._t('phase_1_text_processing'), increment_step=True, queue_type=queue_type)
             logger.info(f"Hybrid mode -> Phase 1: Parallel text processing for {len(queue_to_process)} tasks.")
+            
+            # Встановлюємо статус "в процесі" для обробки тексту
+            text_step_names = ['rewrite_text', 'gen_text'] if is_rewrite else ['gen_text']
+            for step_name in text_step_names:
+                step_name_key = self.app._t('step_name_' + step_name)
+                for task_index, task in enumerate(queue_to_process):
+                    for lang_code in task['selected_langs']:
+                        status_key = self._get_status_key(task_index, lang_code, is_rewrite)
+                        if status_key in self.app.task_completion_status and step_name_key in self.app.task_completion_status[status_key]['steps']:
+                            self.app.task_completion_status[status_key]['steps'][step_name_key] = "В процесі"
+            
+            # Оновлюємо відображення
+            if is_rewrite:
+                self.app.root.after(0, self.app.update_rewrite_task_status_display)
+            else:
+                self.app.root.after(0, self.app.update_task_status_display)
             
             with concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
                 text_futures = {}
@@ -209,11 +269,14 @@ class WorkflowManager:
                 if status_key in self.app.task_completion_status:
                     if data.get('text_results'):
                         # Відмічаємо успішність текстових етапів
-                        steps_to_mark = ['translate', 'rewrite', 'cta', 'gen_prompts']
+                        if is_rewrite:
+                            steps_to_mark = ['rewrite_text', 'gen_text', 'cta', 'gen_prompts']
+                        else:
+                            steps_to_mark = ['gen_text', 'cta', 'gen_prompts']
                         for step in steps_to_mark:
                             step_name_key = self.app._t('step_name_' + step)
                             if step_name_key in self.app.task_completion_status[status_key]['steps']:
-                                self.app.task_completion_status[status_key]['steps'][step_name_key] = "✅"
+                                self.app.task_completion_status[status_key]['steps'][step_name_key] = "Готово"
                         
                         # Зберігаємо загальну кількість запланованих зображень
                         num_prompts = len(data['text_results'].get("prompts", []))
@@ -221,7 +284,7 @@ class WorkflowManager:
                     else:
                         # Якщо текстовий етап провалився, відмічаємо всі наступні як провалені
                         for step_name in self.app.task_completion_status[status_key]['steps']:
-                            self.app.task_completion_status[status_key]['steps'][step_name] = "❌"
+                            self.app.task_completion_status[status_key]['steps'][step_name] = "Помилка"
 
             # Оновлюємо відображення після завершення обробки тексту
             if is_rewrite:
@@ -258,33 +321,50 @@ class WorkflowManager:
             logger.info("Гібридний режим -> Етап 2: Генерацію всіх медіафайлів завершено.")
             
             # --- ЕТАП 3: ОПЦІОНАЛЬНА ПАУЗА ---
-            if self.config.get("ui_settings", {}).get("image_control_enabled", False) and should_gen_images:
+            if self.config.get("ui_settings", {}).get("image_control_enabled", False):
                 self.app.update_progress(self.app._t('phase_3_image_control'), increment_step=True, queue_type=queue_type)
-                logger.info("Гібридний режим -> Етап 3: Пауза для налаштування зображень користувачем.")
+                if should_gen_images:
+                    logger.info("Гібридний режим -> Етап 3: Пауза для налаштування зображень користувачем.")
+                    message_text = "🎨 *Контроль зображень*\n\nВсі зображення згенеровано\\. Будь ласка, перегляньте та відредагуйте їх у програмі, перш ніж продовжити монтаж\\."
+                else:
+                    logger.info("Гібридний режим -> Етап 3: Пауза для контролю перед монтажем (без генерації зображень).")
+                    message_text = "🎬 *Готовність до монтажу*\n\nВсі підготовчі етапи завершено\\. Натисніть кнопку для продовження монтажу\\."
+                
+                logger.info("WORKFLOW PAUSED. Waiting for user to press 'Continue Montage' button...")
                 
                 # Відправляємо статус готовності до монтажу в Firebase
-                self.firebase_api.send_montage_ready_status()
+                if self.firebase_api and self.firebase_api.is_initialized:
+                    self.firebase_api.send_montage_ready_status()
                 
                 # Надсилаємо повідомлення в Telegram
-                self.tg_api.send_message_with_buttons(
-                    message="🎨 *Контроль зображень*\n\nВсі зображення згенеровано\\. Будь ласка, перегляньте та відредагуйте їх у програмі, перш ніж продовжити монтаж\\.",
-                    buttons=[
-                        {"text": "✅ Продовжити монтаж", "callback_data": "continue_montage_action"}
-                    ]
-                )
+                if self.tg_api and self.tg_api.enabled:
+                    self.tg_api.send_message_with_buttons(
+                        message=message_text,
+                        buttons=[
+                            {"text": "✅ Продовжити монтаж", "callback_data": "continue_montage_action"}
+                        ]
+                    )
 
-                self.app.image_control_active.wait()
+                logger.info("Starting wait for user confirmation on 'Continue Montage' button...")
+                self.app.image_control_active.wait() # Чекаємо на команду
+                logger.info("WORKFLOW RESUMED after user confirmation.")
             else:
-                logger.info("Гібридний режим -> Етап 3: Пауза вимкнена або не потрібна, перехід до монтажу.")
+                logger.info("Гібридний режим -> Етап 3: Пауза вимкнена, перехід до монтажу.")
 
             # Phase 4: Final montage and language reports
             self.app.update_progress(self.app._t('phase_4_final_montage'), increment_step=True, queue_type=queue_type)
             logger.info("Hybrid mode -> Phase 4: Starting final montage and language reports.")
+            logger.info(f"Processing data keys for montage: {list(processing_data.keys())}")
 
             for task_key, data in sorted(processing_data.items()):
                 lang_code = task_key[1]
                 task_idx_str = task_key[0]
                 status_key = self._get_status_key(task_idx_str, lang_code, is_rewrite)
+                
+                logger.info(f"Checking montage requirements for task {task_key}:")
+                logger.info(f"  - has task: {bool(data.get('task'))}")
+                logger.info(f"  - has text_results: {bool(data.get('text_results'))}")
+                logger.info(f"  - create_video enabled: {data.get('task', {}).get('steps', {}).get(lang_code, {}).get('create_video', False) if data.get('task') else False}")
                 
                 if data.get('task') and data.get('text_results') and data['task']['steps'][lang_code].get('create_video'):
                     
@@ -292,31 +372,43 @@ class WorkflowManager:
                     all_images = sorted([os.path.join(images_folder, f) for f in os.listdir(images_folder) if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
                     
                     # Детальне логування для діагностики
-                    logger.debug(f"Video montage check for task {task_key}:")
-                    logger.debug(f"  - audio_chunks present: {bool(data.get('audio_chunks'))}")
-                    logger.debug(f"  - audio_chunks count: {len(data.get('audio_chunks', []))}")
-                    logger.debug(f"  - subs_chunks present: {bool(data.get('subs_chunks'))}")
-                    logger.debug(f"  - subs_chunks count: {len(data.get('subs_chunks', []))}")
+                    logger.info(f"Video montage detailed check for task {task_key}:")
+                    logger.info(f"  - audio_chunks present: {bool(data.get('audio_chunks'))}")
+                    logger.info(f"  - audio_chunks count: {len(data.get('audio_chunks', []))}")
+                    logger.info(f"  - subs_chunks present: {bool(data.get('subs_chunks'))}")
+                    logger.info(f"  - subs_chunks count: {len(data.get('subs_chunks', []))}")
+                    logger.info(f"  - images_folder: {images_folder}")
+                    logger.info(f"  - images found: {len(all_images)}")
                     
                     if not data.get('audio_chunks') or not data.get('subs_chunks'):
-                        logger.error(f"Audio or subtitles missing for task {task_key}. Skipping video montage.")
+                        logger.error(f"ПРОБЛЕМА: Audio або subtitles відсутні для завдання {task_key}. Пропускаємо монтаж відео.")
+                        logger.error(f"  - audio_chunks: {data.get('audio_chunks')}")
+                        logger.error(f"  - subs_chunks: {data.get('subs_chunks')}")
                         if status_key in self.app.task_completion_status:
                             step_name = self.app._t('step_name_create_video')
-                            self.app.task_completion_status[status_key]['steps'][step_name] = "❌"
+                            self.app.task_completion_status[status_key]['steps'][step_name] = "Помилка"
                         continue
-                        
-                    if not all_images:
-                        logger.error(f"Зображення не знайдено для завдання {task_key}. Пропускаємо монтаж відео.")
-                        if status_key in self.app.task_completion_status:
-                            step_name = self.app._t('step_name_create_video')
-                            self.app.task_completion_status[status_key]['steps'][step_name] = "❌"
-                        continue
+                else:
+                    logger.warning(f"Завдання {task_key} не відповідає умовам для монтажу:")
+                    logger.warning(f"  - має task: {bool(data.get('task'))}")
+                    logger.warning(f"  - має text_results: {bool(data.get('text_results'))}")
+                    if data.get('task'):
+                        logger.warning(f"  - create_video enabled: {data['task']['steps'][lang_code].get('create_video', False)}")
+                    continue
+
+                # Перевірка наявності зображень (має бути після основного if, не в else!)
+                if not all_images:
+                    logger.error(f"Зображення не знайдено для завдання {task_key}. Пропускаємо монтаж відео.")
+                    if status_key in self.app.task_completion_status:
+                        step_name = self.app._t('step_name_create_video')
+                        self.app.task_completion_status[status_key]['steps'][step_name] = "Помилка"
+                    continue
 
                     # Встановлюємо статус "в процесі" для створення відео
                     if status_key in self.app.task_completion_status:
                         step_name = self.app._t('step_name_create_video')
                         if step_name in self.app.task_completion_status[status_key]['steps']:
-                            self.app.task_completion_status[status_key]['steps'][step_name] = "🔄"
+                            self.app.task_completion_status[status_key]['steps'][step_name] = "В процесі"
                             if is_rewrite:
                                 self.app.root.after(0, self.app.update_rewrite_task_status_display)
                             else:
@@ -362,7 +454,7 @@ class WorkflowManager:
                             logger.info(f"УСПІХ: Створено фінальне відео: {final_video_path}")
                             if status_key in self.app.task_completion_status:
                                 step_name = self.app._t('step_name_create_video')
-                                self.app.task_completion_status[status_key]['steps'][step_name] = "✅"
+                                self.app.task_completion_status[status_key]['steps'][step_name] = "Готово"
                                 if is_rewrite:
                                     self.app.root.after(0, self.app.update_rewrite_task_status_display)
                                 else:
@@ -372,7 +464,7 @@ class WorkflowManager:
                         else:
                              if status_key in self.app.task_completion_status:
                                 step_name = self.app._t('step_name_create_video')
-                                self.app.task_completion_status[status_key]['steps'][step_name] = "❌"
+                                self.app.task_completion_status[status_key]['steps'][step_name] = "Помилка"
                                 if is_rewrite:
                                     self.app.root.after(0, self.app.update_rewrite_task_status_display)
                                 else:
@@ -381,7 +473,7 @@ class WorkflowManager:
                         logger.error(f"ПОМИЛКА: Не вдалося створити всі частини відео для завдання {task_key}.")
                         if status_key in self.app.task_completion_status:
                             step_name = self.app._t('step_name_create_video')
-                            self.app.task_completion_status[status_key]['steps'][step_name] = "❌"
+                            self.app.task_completion_status[status_key]['steps'][step_name] = "Помилка"
                 
                 # Відправка звіту після завершення обробки однієї мови
                 report_timing = self.config.get("telegram", {}).get("report_timing", "per_task")
@@ -439,6 +531,15 @@ class WorkflowManager:
     def _text_processing_worker(self, task, lang_code):
         """Execute all text operations for a single language task."""
         try:
+            # Встановлюємо статус "В процесі" для генерації тексту
+            task_index = task['task_index']
+            status_key = f"{task_index}_{lang_code}"
+            if status_key in self.app.task_completion_status:
+                step_name_key = self.app._t('step_name_gen_text')
+                if step_name_key in self.app.task_completion_status[status_key]['steps']:
+                    self.app.task_completion_status[status_key]['steps'][step_name_key] = "В процесі"
+                    self.app.root.after(0, self.app.update_task_status_display)
+            
             lang_name = lang_code.upper()
             lang_config = self.config["languages"][lang_code]
             lang_steps = task['steps'][lang_code]
@@ -528,6 +629,15 @@ class WorkflowManager:
     def _rewrite_text_processing_worker(self, task, lang_code):
         """Обробляє ВЖЕ транскрибований текст для одного завдання рерайту."""
         try:
+            # Встановлюємо статус "В процесі" для рерайту тексту
+            task_index = task['task_index']
+            status_key = f"rewrite_{task_index}_{lang_code}"
+            if status_key in self.app.task_completion_status:
+                step_name_key = self.app._t('step_name_rewrite_text')
+                if step_name_key in self.app.task_completion_status[status_key]['steps']:
+                    self.app.task_completion_status[status_key]['steps'][step_name_key] = "В процесі"
+                    self.app.root.after(0, self.app.update_rewrite_task_status_display)
+            
             video_title = task['video_title']
             transcribed_text = task['transcribed_text']
             rewrite_base_dir = self.config['output_settings']['rewrite_default_dir']
@@ -546,6 +656,15 @@ class WorkflowManager:
             
             with open(os.path.join(lang_output_path, "rewritten_text.txt"), "w", encoding='utf-8') as f: f.write(rewritten_text)
             
+            # Динамічно оновлюємо статус рерайту
+            task_index = task['task_index']
+            status_key = f"rewrite_{task_index}_{lang_code}"
+            if status_key in self.app.task_completion_status:
+                step_name_key = self.app._t('step_name_rewrite_text')
+                if step_name_key in self.app.task_completion_status[status_key]['steps']:
+                    self.app.task_completion_status[status_key]['steps'][step_name_key] = "Готово"
+                    self.app.root.after(0, self.app.update_rewrite_task_status_display)
+            
             # CTA та промти
             cta_path = os.path.join(lang_output_path, "call_to_action.txt")
             prompts_path = os.path.join(lang_output_path, "image_prompts.txt")
@@ -555,6 +674,13 @@ class WorkflowManager:
                 cta_text = self.or_api.generate_call_to_action(rewritten_text, self.config["openrouter"]["cta_model"], self.config["openrouter"]["cta_params"])
                 if cta_text:
                     with open(cta_path, 'w', encoding='utf-8') as f: f.write(cta_text)
+                    
+                    # Динамічно оновлюємо статус CTA
+                    if status_key in self.app.task_completion_status:
+                        step_name_key = self.app._t('step_name_cta')
+                        if step_name_key in self.app.task_completion_status[status_key]['steps']:
+                            self.app.task_completion_status[status_key]['steps'][step_name_key] = "Готово"
+                            self.app.root.after(0, self.app.update_rewrite_task_status_display)
 
             # Генерація промтів або читання з файлу
             raw_prompts = None
@@ -562,6 +688,13 @@ class WorkflowManager:
                 raw_prompts = self.or_api.generate_image_prompts(rewritten_text, self.config["openrouter"]["prompt_model"], self.config["openrouter"]["prompt_params"])
                 if raw_prompts:
                     with open(prompts_path, 'w', encoding='utf-8') as f: f.write(raw_prompts)
+                    
+                    # Динамічно оновлюємо статус генерації промптів
+                    if status_key in self.app.task_completion_status:
+                        step_name_key = self.app._t('step_name_gen_prompts')
+                        if step_name_key in self.app.task_completion_status[status_key]['steps']:
+                            self.app.task_completion_status[status_key]['steps'][step_name_key] = "Готово"
+                            self.app.root.after(0, self.app.update_rewrite_task_status_display)
             elif os.path.exists(prompts_path):
                 logger.info(f"Using existing prompts file for rewrite task: {prompts_path}")
                 with open(prompts_path, 'r', encoding='utf-8') as f:
@@ -601,13 +734,13 @@ class WorkflowManager:
                 if status_key in self.app.task_completion_status:
                     # Тепер ми перевіряємо, чи були згенеровані якісь зображення
                     if self.app.task_completion_status[status_key]["images_generated"] > 0:
-                        self.app.task_completion_status[status_key]['steps'][step_name] = "✅"
+                        self.app.task_completion_status[status_key]['steps'][step_name] = "Готово"
                     else:
                         # Якщо жодного зображення не згенеровано, вважаємо крок проваленим
-                        self.app.task_completion_status[status_key]['steps'][step_name] = "❌"
+                        self.app.task_completion_status[status_key]['steps'][step_name] = "Помилка"
             else:
                 if status_key in self.app.task_completion_status and step_name in self.app.task_completion_status[status_key]['steps']:
-                    self.app.task_completion_status[status_key]['steps'][step_name] = "⚪️" # Mark as skipped, not failed
+                    self.app.task_completion_status[status_key]['steps'][step_name] = "Пропущено" # Mark as skipped, not failed
 
         logger.info("[Image Control] Image Master Thread: All image generation tasks complete.")
 
@@ -621,7 +754,7 @@ class WorkflowManager:
         if status_key in self.app.task_completion_status:
             step_name = self.app._t('step_name_gen_images')
             if step_name in self.app.task_completion_status[status_key]['steps']:
-                self.app.task_completion_status[status_key]['steps'][step_name] = "🔄"
+                self.app.task_completion_status[status_key]['steps'][step_name] = "В процесі"
                 if is_rewrite:
                     self.app.root.after(0, self.app.update_rewrite_task_status_display)
                 else:
@@ -775,7 +908,7 @@ class WorkflowManager:
         if status_key in self.app.task_completion_status:
             step_name = self.app._t('step_name_gen_images')
             if step_name in self.app.task_completion_status[status_key]['steps']:
-                final_status = "✅" if all_successful else "❌"
+                final_status = "Готово" if all_successful else "Помилка"
                 self.app.task_completion_status[status_key]['steps'][step_name] = final_status
                 if is_rewrite:
                     self.app.root.after(0, self.app.update_rewrite_task_status_display)
@@ -797,12 +930,20 @@ class WorkflowManager:
                     # Встановлюємо статус "в процесі" для аудіо
                     audio_step = self.app._t('step_name_audio')
                     if audio_step in self.app.task_completion_status[status_key]['steps']:
-                        self.app.task_completion_status[status_key]['steps'][audio_step] = "🔄"
+                        self.app.task_completion_status[status_key]['steps'][audio_step] = "В процесі"
                     
                     # Встановлюємо статус "в процесі" для субтитрів
                     subs_step = self.app._t('step_name_create_subtitles')
                     if subs_step in self.app.task_completion_status[status_key]['steps']:
-                        self.app.task_completion_status[status_key]['steps'][subs_step] = "🔄"
+                        self.app.task_completion_status[status_key]['steps'][subs_step] = "В процесі"
+                    
+                    # Ініціалізуємо лічільники для аудіо файлів
+                    num_chunks = self.config.get('parallel_processing', {}).get('num_chunks', 3)
+                    self.app.task_completion_status[status_key]['audio_generated'] = 0
+                    self.app.task_completion_status[status_key]['total_audio'] = num_chunks
+                    # Ініціалізуємо лічільники для субтитрів (прив'язані до аудіо)
+                    self.app.task_completion_status[status_key]['subs_generated'] = 0
+                    self.app.task_completion_status[status_key]['total_subs'] = num_chunks
         
         # Оновлюємо відображення
         if is_rewrite:
@@ -955,6 +1096,24 @@ class WorkflowManager:
                     if result_item.subs_path:
                         info['data']['subs_chunks'].append(result_item.subs_path)
                         info['data']['audio_chunks'].append(result_item.audio_path)
+                        
+                        # Динамічно оновлюємо лічільники аудіо та субтитрів файлів
+                        task_key = result_item.task_key
+                        if isinstance(task_key, tuple) and len(task_key) >= 2:
+                            task_idx_str, lang_code = task_key[0], task_key[1]
+                        else:
+                            continue  # Пропускаємо якщо структура незрозуміла
+                        
+                        status_key = self._get_status_key(task_idx_str, lang_code, is_rewrite)
+                        if status_key in self.app.task_completion_status:
+                            # Оновлюємо лічільники
+                            self.app.task_completion_status[status_key]['audio_generated'] = len(info['data']['audio_chunks'])
+                            self.app.task_completion_status[status_key]['subs_generated'] = len(info['data']['subs_chunks'])
+                            # Оновлюємо відображення
+                            if is_rewrite:
+                                self.app.root.after(0, self.app.update_rewrite_task_status_display)
+                            else:
+                                self.app.root.after(0, self.app.update_task_status_display)
                     
                     completed_transcriptions += 1
                     self.app.update_progress(f"Транскрипція: {completed_transcriptions}/{total_transcriptions_expected}", queue_type=queue_type)
@@ -968,22 +1127,26 @@ class WorkflowManager:
                 info['data']['audio_chunks'].sort()
                 
                 # Встановлюємо фінальний статус для аудіо та субтитрів
-                task_idx_str, lang_code = tk
+                task_idx_str, lang_code = eval(tk)
                 status_key = self._get_status_key(task_idx_str, lang_code, is_rewrite)
                 if status_key in self.app.task_completion_status:
                     # Перевіряємо чи всі аудіо та субтитри завершені успішно
                     has_audio = len(info['data'].get('audio_chunks', [])) > 0
                     has_subs = len(info['data'].get('subs_chunks', [])) > 0
                     
+                    # Оновлюємо лічільник аудіо файлів
+                    if has_audio:
+                        self.app.task_completion_status[status_key]['audio_generated'] = len(info['data'].get('audio_chunks', []))
+                    
                     # Встановлюємо статус для аудіо
                     audio_step = self.app._t('step_name_audio')
                     if audio_step in self.app.task_completion_status[status_key]['steps']:
-                        self.app.task_completion_status[status_key]['steps'][audio_step] = "✅" if has_audio else "❌"
+                        self.app.task_completion_status[status_key]['steps'][audio_step] = "Готово" if has_audio else "Помилка"
                     
                     # Встановлюємо статус для субтитрів
                     subs_step = self.app._t('step_name_create_subtitles')
                     if subs_step in self.app.task_completion_status[status_key]['steps']:
-                        self.app.task_completion_status[status_key]['steps'][subs_step] = "✅" if has_subs else "❌"
+                        self.app.task_completion_status[status_key]['steps'][subs_step] = "Готово" if has_subs else "Помилка"
             
             # Оновлюємо відображення
             if is_rewrite:
