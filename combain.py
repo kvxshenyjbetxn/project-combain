@@ -212,6 +212,11 @@ class TranslationApp:
 
         self.total_queue_steps = 0
         self.current_queue_step = 0
+        
+        # Нові змінні для детального підрахунку прогресу
+        self.total_individual_steps = 0
+        self.completed_individual_steps = 0
+
         self.gui_log_handler = None
         self.scrollable_canvases = []
         
@@ -2903,6 +2908,30 @@ class TranslationApp:
                         return "0.0%"
 
         return status
+    
+    def increment_and_update_progress(self, queue_type='main'):
+        """Збільшує лічильник виконаних кроків та оновлює прогрес-бар."""
+        self.completed_individual_steps += 1
+        self.update_individual_progress(queue_type)
+
+    def update_individual_progress(self, queue_type='main'):
+        """Обчислює та встановлює відсоток виконання для прогрес-бару та тексту."""
+        if self.total_individual_steps > 0:
+            progress_percent = min(100.0, (self.completed_individual_steps / self.total_individual_steps) * 100.0)
+        else:
+            progress_percent = 0.0
+
+        # Вибираємо правильні віджети GUI залежно від типу черги
+        if queue_type == 'rewrite':
+            progress_var = self.rewrite_progress_var
+            label_var = self.rewrite_progress_label_var
+        else:  # 'main'
+            progress_var = self.progress_var
+            label_var = self.progress_label_var
+
+        # Оновлюємо GUI в основному потоці
+        self.root.after(0, lambda: progress_var.set(progress_percent))
+        self.root.after(0, lambda: label_var.set(f"{int(progress_percent)}%"))
 
 if __name__ == "__main__":
     """Main entry point for the Content Translation and Generation Application.

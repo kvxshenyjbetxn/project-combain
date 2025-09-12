@@ -182,9 +182,16 @@ def create_task_tab(notebook, app):
     
     ttk.Button(buttons_frame, text=app._t('clear_queue_button'), command=app.clear_queue, bootstyle="danger").pack(side='left', padx=5)
     
+    # Створюємо контейнер для прогрес-бару та відсотків
+    progress_container = ttk.Frame(app.chain_scrollable_frame)
+    progress_container.pack(fill='x', padx=10, pady=5)
+
+    app.progress_label_var = tk.StringVar(value="0%")
+    ttk.Label(progress_container, textvariable=app.progress_label_var, font=("Helvetica", 10, "bold"), width=5).pack(side='left')
+
     app.progress_var = tk.DoubleVar()
-    app.progress_bar = ttk.Progressbar(app.chain_scrollable_frame, variable=app.progress_var, maximum=100, bootstyle="success-striped")
-    app.progress_bar.pack(fill='x', padx=10, pady=5)
+    app.progress_bar = ttk.Progressbar(progress_container, variable=app.progress_var, maximum=100, bootstyle="success-striped")
+    app.progress_bar.pack(fill='x', expand=True, side='left', padx=(5, 0))
     # Створюємо фрейм для кнопок під прогрес-баром
     chain_buttons_frame = ttk.Frame(app.chain_scrollable_frame)
     chain_buttons_frame.pack(pady=5)
