@@ -412,6 +412,7 @@ class WorkflowManager:
                     if status_key in self.app.task_completion_status:
                         step_name = self.app._t('step_name_create_video')
                         self.app.task_completion_status[status_key]['steps'][step_name] = "Помилка"
+                    continue
 
                 # Встановлюємо статус "в процесі" для створення відео
                 if status_key in self.app.task_completion_status:
@@ -493,7 +494,7 @@ class WorkflowManager:
             logger.info("Гібридний режим -> Всі завдання завершено. Відправка фінальних звітів...")
             report_timing = self.config.get("telegram", {}).get("report_timing", "per_task")
             if report_timing == "per_task":
-                for task_config in queue_to_process:
+                for task_config in queue_to_process_list:
                     self.app.send_task_completion_report(task_config)
             
             # Встановлюємо прогрес-бар на 100% після завершення
@@ -929,49 +930,44 @@ class WorkflowManager:
     def _audio_subs_pipeline_master(self, processing_data, is_rewrite=False, queue_type='main'):
         """Керує пайплайном Аудіо -> Транскрипція з централізованою логікою."""
         logger.info("[Audio/Subs Master] Запуск керованого пайплайну.")
-        
+
         # Встановлюємо статус "в процесі" для аудіо та субтитрів
         for task_key, data in processing_data.items():
             if data.get('text_results'):
                 task_idx_str, lang_code = task_key
                 status_key = self._get_status_key(task_idx_str, lang_code, is_rewrite)
                 if status_key in self.app.task_completion_status:
-                    # Встановлюємо статус "в процесі" для аудіо
                     audio_step = self.app._t('step_name_audio')
                     if audio_step in self.app.task_completion_status[status_key]['steps']:
                         self.app.task_completion_status[status_key]['steps'][audio_step] = "В процесі"
-                    
-                    # Встановлюємо статус "в процесі" для субтитрів
+
                     subs_step = self.app._t('step_name_create_subtitles')
                     if subs_step in self.app.task_completion_status[status_key]['steps']:
                         self.app.task_completion_status[status_key]['steps'][subs_step] = "В процесі"
-                    
-                    # Ініціалізуємо лічільники для аудіо файлів
+
                     num_chunks = self.config.get('parallel_processing', {}).get('num_chunks', 3)
                     self.app.task_completion_status[status_key]['audio_generated'] = 0
                     self.app.task_completion_status[status_key]['total_audio'] = num_chunks
-                    # Ініціалізуємо лічільники для субтитрів (прив'язані до аудіо)
                     self.app.task_completion_status[status_key]['subs_generated'] = 0
                     self.app.task_completion_status[status_key]['total_subs'] = num_chunks
-        
-        # Оновлюємо відображення
+
         if is_rewrite:
             self.app.root.after(0, self.app.update_rewrite_task_status_display)
         else:
             self.app.root.after(0, self.app.update_task_status_display)
-        
+
         num_parallel_chunks = self.config.get('parallel_processing', {}).get('num_chunks', 3)
         self.audio_worker_pool = AudioWorkerPool(self.app, num_parallel_chunks)
         self.audio_worker_pool.start()
-        
+
         tasks_info = {}
         total_audio_chunks_expected = 0
-        
+
         try:
             # 1. Створення плану та відправка всіх аудіо-завдань на виконання
             for task_key, data in sorted(processing_data.items()):
                 if not data.get('text_results'): continue
-                
+
                 task_idx_str, lang_code = task_key
                 lang_config = self.config["languages"][lang_code]
                 tts_service = lang_config.get("tts_service", "elevenlabs")
@@ -979,14 +975,14 @@ class WorkflowManager:
                 temp_dir = os.path.join(data['text_results']['output_path'], "temp_chunks")
                 os.makedirs(temp_dir, exist_ok=True)
                 data['temp_dir'] = temp_dir
-                
+
                 voicemaker_limit = self.config.get("voicemaker", {}).get("char_limit", 2900)
                 text_chunks = []
                 if tts_service == "voicemaker" and len(text_to_process) > voicemaker_limit:
                     text_chunks = chunk_text_voicemaker(text_to_process, voicemaker_limit)
-                else: # ElevenLabs та короткі тексти
+                else:
                     text_chunks = chunk_text(text_to_process, num_parallel_chunks)
-                
+
                 if not text_chunks:
                     logger.warning(f"Текст для {task_key} порожній, аудіо не буде згенеровано.")
                     continue
@@ -998,7 +994,7 @@ class WorkflowManager:
                     'completed_audio_items': [],
                     'data': data
                 }
-                
+
                 for i, chunk in enumerate(text_chunks):
                     audio_task = AudioPipelineItem(
                         text_chunk=chunk,
@@ -1013,14 +1009,16 @@ class WorkflowManager:
 
             # 2. Цикл збору результатів озвучки та відправки на транскрипцію
             completed_audio_count = 0
+            total_transcriptions_submitted = 0 # <-- ВИРІШЕННЯ: Новий лічильник для фактично створених завдань
+
             while completed_audio_count < total_audio_chunks_expected and not self.app.shutdown_event.is_set():
                 try:
                     result = self.audio_worker_pool.audio_results_queue.get(timeout=1.0)
                     completed_audio_count += 1
-                    
+
                     if not result.success:
                         logger.error(f"Помилка генерації аудіо для {result.item.task_key}, фрагмент {result.item.chunk_index}. Пропускаємо.")
-                        continue
+                        continue # <-- ВИРІШЕННЯ: Якщо аудіо не вдалося, просто пропускаємо. Завдання на транскрипцію не створюється, і лічильник не збільшується.
 
                     task_key = result.item.task_key
                     task_info = tasks_info[task_key]
@@ -1029,71 +1027,59 @@ class WorkflowManager:
                     self.app.update_progress(f"Озвучка: {completed_audio_count}/{total_audio_chunks_expected}", queue_type=queue_type)
 
                     if task_info['tts_service'] != 'voicemaker':
-                        # Всі інші сервіси відправляємо на транскрипцію відразу
                         trans_item = TranscriptionPipelineItem(
                             audio_path=result.item.output_path, output_dir=os.path.dirname(result.item.output_path),
                             chunk_index=result.item.chunk_index, lang_code=result.item.lang_code, task_key=task_key
                         )
                         self.audio_worker_pool.add_transcription_task(trans_item)
+                        total_transcriptions_submitted += 1 # <-- ВИРІШЕННЯ: Збільшуємо лічильник тільки при успішному створенні завдання
                     elif len(task_info['completed_audio_items']) == task_info['total_chunks']:
-                        # Voicemaker: чекаємо, поки зберуться всі частини
                         logger.info(f"Всі {task_info['total_chunks']} частин для {task_key} (Voicemaker) готові. Починаю об'єднання.")
-                        
+
                         sorted_items = sorted(task_info['completed_audio_items'], key=lambda x: x.chunk_index)
                         audio_paths_to_merge = [item.output_path for item in sorted_items]
-                        groups = np.array_split(audio_paths_to_merge, num_parallel_chunks)
-                        
-                        # Нова логіка, щоб залишок йшов в останню групу
+
                         n = len(audio_paths_to_merge)
                         k = num_parallel_chunks
-                        
                         groups = []
                         if n > 0 and k > 0:
                             base_size = n // k
-                            
                             start_index = 0
-                            # Перші k-1 груп
                             for _ in range(k - 1):
                                 end_index = start_index + base_size
                                 group = audio_paths_to_merge[start_index:end_index]
                                 if group: groups.append(group)
                                 start_index = end_index
-                            
-                            # Остання група отримує все, що залишилось
                             last_group = audio_paths_to_merge[start_index:]
                             if last_group: groups.append(last_group)
-                        
-                        for i, group in enumerate(groups):
-                            if not group.any(): continue
-                            
+
+                        for i, group_list in enumerate(groups):
+                            if not group_list: continue
+
                             merged_path = os.path.join(task_info['data']['temp_dir'], f"merged_chunk_{i}.mp3")
-                            if len(group) > 1:
-                                if not concatenate_audio_files(list(group), merged_path):
+                            if len(group_list) > 1:
+                                if not concatenate_audio_files(group_list, merged_path):
                                     logger.error(f"Не вдалося об'єднати групу {i} для {task_key}")
                                     continue
                             else:
-                                shutil.copy(group[0], merged_path)
-                            
+                                shutil.copy(group_list[0], merged_path)
+
                             trans_item = TranscriptionPipelineItem(
                                 audio_path=merged_path, output_dir=os.path.dirname(merged_path),
                                 chunk_index=i, lang_code=result.item.lang_code,
                                 task_key=task_key, is_merged_group=True
                             )
                             self.audio_worker_pool.add_transcription_task(trans_item)
+                            total_transcriptions_submitted += 1 # <-- ВИРІШЕННЯ: Збільшуємо лічильник
                 except queue.Empty:
                     continue
-            
+
             # 3. Збираємо результати транскрипції
-            total_transcriptions_expected = 0
-            for tk, info in tasks_info.items():
-                if info['tts_service'] == 'voicemaker':
-                    total_transcriptions_expected += min(info['total_chunks'], num_parallel_chunks)
-                else:
-                    total_transcriptions_expected += info['total_chunks']
-            
-            logger.info(f"Очікується {total_transcriptions_expected} результатів транскрипції.")
+            logger.info(f"Очікується {total_transcriptions_submitted} результатів транскрипції.")
             completed_transcriptions = 0
-            while completed_transcriptions < total_transcriptions_expected and not self.app.shutdown_event.is_set():
+
+            # <-- ВИРІШЕННЯ: Використовуємо новий, надійний лічильник в умові циклу
+            while completed_transcriptions < total_transcriptions_submitted and not self.app.shutdown_event.is_set():
                 try:
                     result_item = self.transcription_results_queue.get(timeout=1.0)
                     task_key = result_item.task_key
@@ -1105,67 +1091,67 @@ class WorkflowManager:
                     if result_item.subs_path:
                         info['data']['subs_chunks'].append(result_item.subs_path)
                         info['data']['audio_chunks'].append(result_item.audio_path)
-                        
-                        # Динамічно оновлюємо лічільники аудіо та субтитрів файлів
-                        task_key = result_item.task_key
-                        if isinstance(task_key, tuple) and len(task_key) >= 2:
-                            task_idx_str, lang_code = task_key[0], task_key[1]
-                        else:
-                            continue  # Пропускаємо якщо структура незрозуміла
-                        
-                        status_key = self._get_status_key(task_idx_str, lang_code, is_rewrite)
-                        if status_key in self.app.task_completion_status:
-                            # Оновлюємо лічільники
-                            self.app.task_completion_status[status_key]['audio_generated'] = len(info['data']['audio_chunks'])
-                            self.app.task_completion_status[status_key]['subs_generated'] = len(info['data']['subs_chunks'])
-                            # Оновлюємо відображення
-                            if is_rewrite:
-                                self.app.root.after(0, self.app.update_rewrite_task_status_display)
-                            else:
-                                self.app.root.after(0, self.app.update_task_status_display)
-                    
+
+                        if isinstance(task_key, str):
+                            try:
+                                task_key_tuple = eval(task_key)
+                                if isinstance(task_key_tuple, tuple) and len(task_key_tuple) >= 2:
+                                    task_idx_str, lang_code = task_key_tuple[0], task_key_tuple[1]
+                                    status_key = self._get_status_key(task_idx_str, lang_code, is_rewrite)
+                                    if status_key in self.app.task_completion_status:
+                                        self.app.task_completion_status[status_key]['audio_generated'] = len(info['data']['audio_chunks'])
+                                        self.app.task_completion_status[status_key]['subs_generated'] = len(info['data']['subs_chunks'])
+                                        if is_rewrite:
+                                            self.app.root.after(0, self.app.update_rewrite_task_status_display)
+                                        else:
+                                            self.app.root.after(0, self.app.update_task_status_display)
+                            except Exception as e:
+                                logger.error(f"Could not parse task_key for status update: {task_key}, error: {e}")
+
                     completed_transcriptions += 1
-                    self.app.update_progress(f"Транскрипція: {completed_transcriptions}/{total_transcriptions_expected}", queue_type=queue_type)
+                    self.app.update_progress(f"Транскрипція: {completed_transcriptions}/{total_transcriptions_submitted}", queue_type=queue_type)
 
                 except queue.Empty:
                     continue
 
             # Сортуємо результати для правильного порядку монтажу
             for tk, info in tasks_info.items():
-                info['data']['subs_chunks'].sort()
-                info['data']['audio_chunks'].sort()
-                
-                # Встановлюємо фінальний статус для аудіо та субтитрів
-                task_idx_str, lang_code = eval(tk)
-                status_key = self._get_status_key(task_idx_str, lang_code, is_rewrite)
-                if status_key in self.app.task_completion_status:
-                    # Перевіряємо чи всі аудіо та субтитри завершені успішно
-                    has_audio = len(info['data'].get('audio_chunks', [])) > 0
-                    has_subs = len(info['data'].get('subs_chunks', [])) > 0
-                    
-                    # Оновлюємо лічільник аудіо файлів
-                    if has_audio:
-                        self.app.task_completion_status[status_key]['audio_generated'] = len(info['data'].get('audio_chunks', []))
-                    
-                    # Встановлюємо статус для аудіо
-                    audio_step = self.app._t('step_name_audio')
-                    if audio_step in self.app.task_completion_status[status_key]['steps']:
-                        self.app.task_completion_status[status_key]['steps'][audio_step] = "Готово" if has_audio else "Помилка"
-                    
-                    # Встановлюємо статус для субтитрів
-                    subs_step = self.app._t('step_name_create_subtitles')
-                    if subs_step in self.app.task_completion_status[status_key]['steps']:
-                        self.app.task_completion_status[status_key]['steps'][subs_step] = "Готово" if has_subs else "Помилка"
-            
-            # Оновлюємо відображення
+                if 'subs_chunks' in info['data']: info['data']['subs_chunks'].sort()
+                if 'audio_chunks' in info['data']: info['data']['audio_chunks'].sort()
+
+                try:
+                    task_key_tuple = eval(tk)
+                    task_idx_str, lang_code = task_key_tuple
+                    status_key = self._get_status_key(task_idx_str, lang_code, is_rewrite)
+                    if status_key in self.app.task_completion_status:
+                        has_audio = len(info['data'].get('audio_chunks', [])) > 0
+                        has_subs = len(info['data'].get('subs_chunks', [])) > 0
+
+                        if has_audio:
+                            self.app.task_completion_status[status_key]['audio_generated'] = len(info['data'].get('audio_chunks', []))
+
+                        audio_step = self.app._t('step_name_audio')
+                        if audio_step in self.app.task_completion_status[status_key]['steps']:
+                            self.app.task_completion_status[status_key]['steps'][audio_step] = "Готово" if has_audio else "Помилка"
+
+                        subs_step = self.app._t('step_name_create_subtitles')
+                        if subs_step in self.app.task_completion_status[status_key]['steps']:
+                            self.app.task_completion_status[status_key]['steps'][subs_step] = "Готово" if has_subs else "Помилка"
+                except Exception as e:
+                    logger.error(f"Error finalizing status for task key {tk}: {e}")
+
             if is_rewrite:
                 self.app.root.after(0, self.app.update_rewrite_task_status_display)
             else:
                 self.app.root.after(0, self.app.update_task_status_display)
 
+        except Exception as e:
+            logger.exception(f"CRITICAL ERROR in audio/subs master pipeline: {e}")
+
         finally:
             if self.audio_worker_pool:
                 self.audio_worker_pool.stop()
+                logger.info("[Audio/Subs Master] Пайплайн завершено, воркер пул зупинено.")
 
     def _concatenate_videos(self, app_instance, video_chunks, output_path):
         """Об'єднання відеофрагментів."""
