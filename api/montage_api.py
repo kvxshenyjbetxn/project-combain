@@ -167,13 +167,13 @@ class MontageAPI:
         video_name = os.path.basename(output_video_path)
         logger.info(f"Монтаж -> Початок створення відео '{video_name}'")
         try:
-            self.update_callback(f"Аналіз медіа: {video_name}...")
+            self.update_callback(f"Аналіз медіа: {video_name}...", task_key=task_key, chunk_index=chunk_index, progress=0)
             probe = ffmpeg.probe(audio_path)
             audio_duration = float(probe['format']['duration'])
             
             if not image_paths:
                 logger.error(f"Монтаж -> ПОМИЛКА: Немає зображень для створення відео '{video_name}'.")
-                self.update_callback("Помилка: не обрано зображень для відео.")
+                self.update_callback("Помилка: не обрано зображень для відео.", task_key=task_key, chunk_index=chunk_index)
                 return False
             
             num_images = len(image_paths)
@@ -186,11 +186,11 @@ class MontageAPI:
             if image_duration <= transition_duration and num_images > 1:
                 msg = f"Тривалість аудіо замала. Час картинки ({image_duration:.2f}с) <= часу переходу ({transition_duration:.2f}с)."
                 logger.error(f"Монтаж -> ПОМИЛКА: {msg}")
-                self.update_callback(f"Помилка: {msg}")
+                self.update_callback(f"Помилка: {msg}", task_key=task_key, chunk_index=chunk_index)
                 return False
 
             logger.info(f"Монтаж -> Тривалість аудіо: {audio_duration:.2f}с. Час на картинку: ~{image_duration:.2f}с.")
-            self.update_callback(f"Тривалість аудіо: {audio_duration:.2f}с. Час на картинку: ~{image_duration:.2f}с.")
+            self.update_callback(f"Тривалість аудіо: {audio_duration:.2f}с. Час на картинку: ~{image_duration:.2f}с.", task_key=task_key, chunk_index=chunk_index)
 
             video_streams = []
             output_width, output_height = 1920, 1080
@@ -276,7 +276,7 @@ class MontageAPI:
 
             output_params = {k: v for k, v in output_params.items() if v != '' and v is not None}
             
-            self.update_callback(f"Монтаж: '{video_name}' з кодеком '{video_codec}'...")
+            self.update_callback(f"Монтаж: '{video_name}' з кодеком '{video_codec}'...", task_key=task_key, chunk_index=chunk_index)
             logger.info(f"Монтаж -> Рендеринг '{video_name}' з кодеком '{video_codec}'. Параметри: {output_params}")
 
             ffmpeg_executable = "ffmpeg"
@@ -338,14 +338,14 @@ class MontageAPI:
                     error_details=f"Помилка FFmpeg (код {process.returncode}). Перевірте детальний лог."
                 )
 
-                self.update_callback(f"Помилка монтажу {os.path.basename(output_video_path)}. Див. лог.")
+                self.update_callback(f"Помилка монтажу {os.path.basename(output_video_path)}. Див. лог.", task_key=task_key, chunk_index=chunk_index)
                 return False
 
             logger.info(f"Монтаж -> УСПІХ: Відео успішно створено: {output_video_path}")
-            self.update_callback(f"Монтаж {video_name} завершено.")
+            self.update_callback(f"Монтаж {video_name} завершено.", task_key=task_key, chunk_index=chunk_index, progress=100)
             return True
 
         except Exception as e:
             logger.error(f"Монтаж -> КРИТИЧНА ПОМИЛКА: Непередбачена помилка під час створення відео '{video_name}': {e}", exc_info=True)
-            self.update_callback(f"Критична помилка монтажу: {e}")
+            self.update_callback(f"Критична помилка монтажу: {e}", task_key=task_key, chunk_index=chunk_index)
             return False

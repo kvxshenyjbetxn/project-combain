@@ -691,6 +691,9 @@ class TranslationApp:
         self.image_gallery_frame = ttk.Frame(self.root)
         self.continue_button = ttk.Button(self.image_gallery_frame, text=self._t('continue_button'), command=self.continue_processing_after_image_control, bootstyle="success")
 
+        # Запускаємо періодичне оновлення GUI для прогресу
+        self.start_periodic_progress_update()
+
     def add_to_queue(self, silent=False):
         selected_langs = [code for code, var in self.lang_checkbuttons.items() if var.get()]
         
@@ -954,8 +957,14 @@ class TranslationApp:
 
         elif step_key == 'create_video':
             if status == "В процесі":
-                progress = status_info.get('video_progress', 0.0)
-                return f"{progress:.1f}%"
+                with self.video_progress_lock:
+                    task_key_tuple = (task_index, lang_code)
+                    progress_dict = self.video_chunk_progress.get(task_key_tuple, {})
+                    if progress_dict:
+                        avg_progress = sum(progress_dict.values()) / len(progress_dict)
+                        return f"{avg_progress:.1f}%"
+                    else:
+                        return "0.0%"
             return status
 
         elif step_key in ['translate', 'gen_text', 'cta', 'gen_prompts']:
@@ -2812,7 +2821,88 @@ class TranslationApp:
 
     def clear_firebase_images(self):
         """Очищає зображення Firebase."""
-        clear_firebase_images(self)
+        clear_firebase_images(self)\
+    
+    def update_progress_for_montage(self, message, task_key=None, chunk_index=None, progress=None):
+        logger.info(f"[Montage Progress] {message}")
+        if task_key is not None and chunk_index is not None and progress is not None:
+            with self.video_progress_lock:
+                if task_key not in self.video_chunk_progress:
+                    self.video_chunk_progress[task_key] = {}
+                self.video_chunk_progress[task_key][chunk_index] = progress
+
+    def start_periodic_progress_update(self):
+        """Запускає таймер для періодичного оновлення GUI."""
+        self._update_video_progress_display_periodic()
+        # Плануємо наступний виклик через 5 секунд
+        self.root.after(5000, self.start_periodic_progress_update)
+
+    def _update_video_progress_display_periodic(self):
+        """Оновлює відображення черг, якщо вони в процесі обробки."""
+        if self.is_processing_queue:
+            self.update_queue_display()
+        if self.is_processing_rewrite_queue:
+            self.update_rewrite_queue_display()
+
+    def _get_rewrite_step_status(self, task_index, lang_code, step_key):
+        """Отримує статус конкретного кроку рерайт у вигляді тексту"""
+        if not hasattr(self, 'task_completion_status'):
+            return ""
+
+        status_key = f"rewrite_{task_index}_{lang_code}"
+        if status_key not in self.task_completion_status:
+            return ""
+
+        status_info = self.task_completion_status[status_key]
+        step_name_map = {
+            'transcribe': 'step_name_transcribe',
+            'rewrite': 'step_name_rewrite_text',
+            'cta': 'step_name_cta',
+            'gen_prompts': 'step_name_gen_prompts',
+            'gen_images': 'step_name_gen_images',
+            'audio': 'step_name_audio',
+            'create_subtitles': 'step_name_create_subtitles',
+            'create_video': 'step_name_create_video'
+        }
+        
+        step_name_key = self._t(step_name_map.get(step_key, ''))
+        
+        if not step_name_key or step_name_key not in status_info.get('steps', {}):
+             # Якщо ключ не знайдено або крок не для цього завдання, повертаємо порожній рядок
+            return ""
+
+        status = status_info['steps'][step_name_key]
+
+        # Динамічне відображення прогресу для конкретних кроків
+        if status == "В процесі":
+            if step_key == 'gen_images':
+                total = status_info.get('total_images', 0)
+                done = status_info.get('images_generated', 0)
+                return f"{done}/{total}" if total > 0 else status
+            elif step_key == 'transcribe':
+                total = status_info.get('total_files', 0)
+                done = status_info.get('transcribed_files', 0)
+                return f"{done}/{total}" if total > 0 else status
+            elif step_key == 'audio':
+                total = status_info.get('total_audio', 0)
+                done = status_info.get('audio_generated', 0)
+                return f"{done}/{total}" if total > 0 else status
+            elif step_key == 'create_subtitles':
+                total = status_info.get('total_subs', 0)
+                done = status_info.get('subs_generated', 0)
+                return f"{done}/{total}" if total > 0 else status
+            elif step_key == 'create_video':
+                with self.video_progress_lock:
+                    task_key_tuple = (task_index, lang_code)
+                    # Для рерайту ключ у video_chunk_progress буде такий самий
+                    progress_dict = self.video_chunk_progress.get(task_key_tuple, {})
+                    if progress_dict:
+                        avg_progress = sum(progress_dict.values()) / len(progress_dict)
+                        return f"{avg_progress:.1f}%"
+                    else:
+                        return "0.0%"
+
+        return status
 
 if __name__ == "__main__":
     """Main entry point for the Content Translation and Generation Application.
