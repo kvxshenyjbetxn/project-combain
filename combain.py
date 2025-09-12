@@ -215,6 +215,10 @@ class TranslationApp:
         self.gui_log_handler = None
         self.scrollable_canvases = []
         
+        # Сховище для прогресу відео-чанків
+        self.video_chunk_progress = {}
+        self.video_progress_lock = threading.Lock()
+        
         # Task status tracking for reports
         self.task_completion_status = {}
 
@@ -924,69 +928,39 @@ class TranslationApp:
         """Отримує статус конкретного кроку у вигляді тексту"""
         if not hasattr(self, 'task_completion_status'):
             return ""
-        
+
         status_key = f"{task_index}_{lang_code}"
         if status_key not in self.task_completion_status:
             return ""
-        
-        # Спеціальна обробка для різних типів кроків
+
+        status_info = self.task_completion_status[status_key]
+        step_name_key = self._t(f'step_name_{step_key}')
+        status = status_info.get('steps', {}).get(step_name_key, "")
+
         if step_key == 'gen_images':
-            # Для зображень показуємо прогрес
-            status_info = self.task_completion_status[status_key]
-            total_images = status_info.get('total_images', 0)
-            generated_images = status_info.get('images_generated', 0)
-            if total_images > 0:
-                return f"{generated_images}/{total_images}"
-            return ""
-        
+            total = status_info.get('total_images', 0)
+            done = status_info.get('images_generated', 0)
+            return f"{done}/{total}" if total > 0 else status
+
         elif step_key == 'audio':
-            # Для аудіо показуємо прогрес у форматі "3/3"
-            status_info = self.task_completion_status[status_key]
-            total_audio = status_info.get('total_audio', 0)
-            generated_audio = status_info.get('audio_generated', 0)
-            step_name = self._t(f'step_name_{step_key}')
-            if step_name in self.task_completion_status[status_key]['steps']:
-                status = self.task_completion_status[status_key]['steps'][step_name]
-                if status == "В процесі" and total_audio > 0:
-                    return f"{generated_audio}/{total_audio}"
-                elif status == "Готово":
-                    return "Готово"
-                elif status == "Помилка":
-                    return "Помилка"
-            return ""
-        
+            total = status_info.get('total_audio', 0)
+            done = status_info.get('audio_generated', 0)
+            return f"{done}/{total}" if total > 0 else status
+
         elif step_key == 'create_subtitles':
-            # Для субтитрів показуємо прогрес у форматі "2/3" (прив'язано до аудіо)
-            status_info = self.task_completion_status[status_key]
-            total_subs = status_info.get('total_subs', 0)
-            generated_subs = status_info.get('subs_generated', 0)
-            step_name = self._t(f'step_name_{step_key}')
-            if step_name in self.task_completion_status[status_key]['steps']:
-                status = self.task_completion_status[status_key]['steps'][step_name]
-                if status == "В процесі" and total_subs > 0:
-                    return f"{generated_subs}/{total_subs}"
-                elif status == "Готово":
-                    return "Готово"
-                elif status == "Помилка":
-                    return "Помилка"
-            return ""
-        
-        elif step_key in ['create_video']:
-            # Для відео показуємо прогрес файлів
-            step_name = self._t(f'step_name_{step_key}')
-            if step_name in self.task_completion_status[status_key]['steps']:
-                status = self.task_completion_status[status_key]['steps'][step_name]
-                return status  # Повертаємо статус як є (Готово, Помилка, В процесі)
-            return ""
-        
+            total = status_info.get('total_subs', 0)
+            done = status_info.get('subs_generated', 0)
+            return f"{done}/{total}" if total > 0 else status
+
+        elif step_key == 'create_video':
+            if status == "В процесі":
+                progress = status_info.get('video_progress', 0.0)
+                return f"{progress:.1f}%"
+            return status
+
         elif step_key in ['translate', 'gen_text', 'cta', 'gen_prompts']:
-            # Для перекладу та генерації просто показуємо статус
-            step_name = self._t(f'step_name_{step_key}')
-            if step_name in self.task_completion_status[status_key]['steps']:
-                status = self.task_completion_status[status_key]['steps'][step_name]
-                return status  # Повертаємо статус як є (Готово, Помилка, В процесі)
-            return ""
-        
+            return status
+
         return ""
     
     def update_task_status_display(self, task_index=None, lang_code=None, step_key=None, status=None):
@@ -1598,9 +1572,24 @@ class TranslationApp:
         else:  # 'main'
             self.root.after(0, lambda: self.progress_var.set(progress_percent))
     
-    def update_progress_for_montage(self, message):
-        # self.root.after(0, lambda: self.progress_label.config(text=message))
+    def update_progress_for_montage(self, message, task_key=None, chunk_index=None, progress=None):
         logger.info(f"[Montage Progress] {message}")
+        if task_key and chunk_index is not None and progress is not None:
+            with self.video_progress_lock:
+                if task_key not in self.video_chunk_progress:
+                    self.video_chunk_progress[task_key] = {}
+                self.video_chunk_progress[task_key][chunk_index] = progress
+
+                # Розрахунок середнього прогресу для завдання
+                total_progress = sum(self.video_chunk_progress[task_key].values())
+                num_active_chunks = len(self.video_chunk_progress[task_key])
+                average_progress = total_progress / num_active_chunks if num_active_chunks > 0 else 0
+                
+                # Оновлення статусу в task_completion_status
+                task_index, lang_code = task_key
+                status_key = f"{task_index}_{lang_code}"
+                if status_key in self.task_completion_status:
+                    self.task_completion_status[status_key]['video_progress'] = average_progress
 
 # Test connection methods
     def test_openrouter_connection(self):

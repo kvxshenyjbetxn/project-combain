@@ -431,16 +431,17 @@ class WorkflowManager:
 
                 with concurrent.futures.ThreadPoolExecutor(max_workers=num_montage_threads) as executor:
                     video_futures = {
-                        executor.submit(
-                            self._video_chunk_worker, 
-                            self.app,
-                            list(image_chunks[i]), 
-                            data['audio_chunks'][i], 
-                            data['subs_chunks'][i],
-                            os.path.join(data['temp_dir'], f"video_chunk_{i:02d}.mp4"),  # zfill для правильного сортування
-                            i + 1, len(data['audio_chunks'])
-                        ): i for i in range(len(data['audio_chunks']))
-                    }
+                    executor.submit(
+                        self._video_chunk_worker,
+                        self.app,
+                        list(image_chunks[i]),
+                        data['audio_chunks'][i],
+                        data['subs_chunks'][i],
+                        os.path.join(data['temp_dir'], f"video_chunk_{i:02d}.mp4"),
+                        i + 1, len(data['audio_chunks']),
+                        task_key # Додаємо task_key
+                    ): i for i in range(len(data['audio_chunks']))
+                }
                     
                     # Збираємо результати з правильним індексом для гарантованого порядку
                     video_results = {}
@@ -573,6 +574,11 @@ class WorkflowManager:
 
             # Translation logic
             if lang_steps.get('translate'):
+                step_name_key = self.app._t('step_name_translate')
+                if status_key in self.app.task_completion_status:
+                    self.app.task_completion_status[status_key]['steps'][step_name_key] = "В процесі"
+                    self.app.root.after(0, self.app.update_task_status_display)
+
                 translated_text = self.or_api.translate_text(
                     task['input_text'], self.config["openrouter"]["translation_model"],
                     self.config["openrouter"]["translation_params"], lang_name,
@@ -582,8 +588,12 @@ class WorkflowManager:
                     text_to_process = translated_text
                     with open(translation_path, 'w', encoding='utf-8') as f:
                         f.write(translated_text)
+                    if status_key in self.app.task_completion_status:
+                        self.app.task_completion_status[status_key]['steps'][step_name_key] = "Готово"
                 else:
                     logger.error(f"Translation failed for {lang_name}.")
+                    if status_key in self.app.task_completion_status:
+                        self.app.task_completion_status[status_key]['steps'][step_name_key] = "Помилка"
                     return None
             elif os.path.exists(translation_path):
                  with open(translation_path, 'r', encoding='utf-8') as f:
@@ -1117,7 +1127,7 @@ class WorkflowManager:
                                     task_idx_str, lang_code = task_key_tuple[0], task_key_tuple[1]
                                     status_key = self._get_status_key(task_idx_str, lang_code, is_rewrite)
                                     if status_key in self.app.task_completion_status:
-                                        self.app.task_completion_status[status_key]['audio_generated'] = len(info['data']['audio_chunks'])
+                                        # Оновлюємо тільки лічильник субтитрів тут
                                         self.app.task_completion_status[status_key]['subs_generated'] = len(info['data']['subs_chunks'])
                                         if is_rewrite:
                                             self.app.root.after(0, self.app.update_rewrite_task_status_display)
@@ -1175,7 +1185,7 @@ class WorkflowManager:
         """Об'єднання відеофрагментів."""
         return concatenate_videos(app_instance, video_chunks, output_path)
 
-    def _video_chunk_worker(self, app_instance, image_chunk, audio_path, subs_path, output_path, chunk_num, total_chunks):
+    def _video_chunk_worker(self, app_instance, image_chunk, audio_path, subs_path, output_path, chunk_num, total_chunks, task_key):
         """Створення одного відеофрагменту."""
         from utils.media_utils import video_chunk_worker
-        return video_chunk_worker(app_instance, image_chunk, audio_path, subs_path, output_path, chunk_num, total_chunks)
+        return video_chunk_worker(app_instance, image_chunk, audio_path, subs_path, output_path, chunk_num, total_chunks, task_key)

@@ -160,7 +160,7 @@ class MontageAPI:
 
         return new_segments
 
-    def create_video(self, image_paths, audio_path, ass_path, output_video_path):
+    def create_video(self, image_paths, audio_path, ass_path, output_video_path, task_key=None, chunk_index=None):
         """Створює відео з зображень, аудіо та субтитрів з ефектами, ЗАВЖДИ з переходами."""
         cfg = self.config
         codec_cfg = cfg.get('codec', {})
@@ -292,37 +292,27 @@ class MontageAPI:
 
             for line in process.stderr:
                 line = line.strip()
-                logger.debug(f"FFMPEG -> {line}") # Детальний лог у файл залишаємо без змін
+                logger.debug(f"FFMPEG -> {line}")
 
                 if line.startswith("frame="):
                     current_time = time.time()
                     if current_time - last_update_time > update_interval:
                         last_update_time = current_time
-
-                        if threading.current_thread() is threading.main_thread():
-                            # Цей код виконується тільки в основному потоці
-                            match = re.search(r"frame=\s*(\d+)", line)
-                            if match and total_output_frames > 0:
-                                progress = (int(match.group(1)) / total_output_frames) * 100
-                                self.update_callback(f"Монтаж відео... {progress:.1f}%")
-                        else:
-                            # Цей код для паралельних потоків, форматує вивід
-                            progress, fps, bitrate = 0.0, "N/A", "N/A"
-
-                            frame_match = re.search(r"frame=\s*(\d+)", line)
-                            if frame_match and total_output_frames > 0:
-                                progress = (int(frame_match.group(1)) / total_output_frames) * 100
-
-                            fps_match = re.search(r"fps=\s*([\d\.]+)", line)
-                            if fps_match:
-                                fps = fps_match.group(1)
-
-                            bitrate_match = re.search(r"bitrate=\s*([\d\.]+\w*bits/s)", line)
-                            if bitrate_match:
-                                bitrate = bitrate_match.group(1)
-                            
-                            formatted_line = f"Прогрес: {progress:.1f}% | FPS: {fps} | Бітрейт: {bitrate}"
-                            logger.info(formatted_line)
+                        
+                        progress = 0.0
+                        frame_match = re.search(r"frame=\s*(\d+)", line)
+                        if frame_match and total_output_frames > 0:
+                            progress = (int(frame_match.group(1)) / total_output_frames) * 100
+                        
+                        # Формуємо повідомлення для основного логу
+                        fps_match = re.search(r"fps=\s*([\d\.]+)", line)
+                        fps = fps_match.group(1) if fps_match else "N/A"
+                        bitrate_match = re.search(r"bitrate=\s*([\d\.]+\w*bits/s)", line)
+                        bitrate = bitrate_match.group(1) if bitrate_match else "N/A"
+                        formatted_line = f"Прогрес: {progress:.1f}% | FPS: {fps} | Бітрейт: {bitrate}"
+                        
+                        # Передаємо дані в callback
+                        self.update_callback(formatted_line, task_key=task_key, chunk_index=chunk_index, progress=progress)
 
             stdout, stderr = process.communicate()
             
