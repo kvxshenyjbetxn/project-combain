@@ -35,9 +35,12 @@ def add_rewrite_lang_widgets(app, lang_code):
     
     steps = {
         'transcribe': app._t('step_transcribe'),
-        'rewrite': app._t('step_rewrite'), 'cta': app._t('step_cta'), 
-        'gen_prompts': app._t('step_gen_prompts'), 'gen_images': app._t('step_gen_images'), 
-        'audio': app._t('step_audio'), 'create_subtitles': app._t('step_create_subtitles'),
+        'rewrite': app._t('step_rewrite'), 
+        'cta': app._t('step_cta'), 
+        'gen_prompts': app._t('step_gen_prompts'), 
+        'gen_images': app._t('step_gen_images'), 
+        'audio': app._t('step_audio'), 
+        'create_subtitles': app._t('step_create_subtitles'),
         'create_video': app._t('step_create_video')
     }
     

@@ -1023,6 +1023,24 @@ class WorkflowManager:
                     task_key = result.item.task_key
                     task_info = tasks_info[task_key]
                     task_info['completed_audio_items'].append(result.item)
+                    
+                    # --- НОВИЙ БЛОК: Незалежне оновлення лічильника аудіо ---
+                    try:
+                        task_key_tuple = eval(task_key)
+                        task_idx_str, lang_code = task_key_tuple[0], task_key_tuple[1]
+                        status_key = self._get_status_key(task_idx_str, lang_code, is_rewrite)
+                        if status_key in self.app.task_completion_status:
+                            # Збільшуємо лічильник згенерованого аудіо
+                            current_audio_count = self.app.task_completion_status[status_key].get('audio_generated', 0)
+                            self.app.task_completion_status[status_key]['audio_generated'] = current_audio_count + 1
+                            # Оновлюємо інтерфейс
+                            if is_rewrite:
+                                self.app.root.after(0, self.app.update_rewrite_task_status_display)
+                            else:
+                                self.app.root.after(0, self.app.update_task_status_display)
+                    except Exception as e:
+                        logger.error(f"Помилка оновлення статусу аудіо для {task_key}: {e}")
+                    # --- КІНЕЦЬ НОВОГО БЛОКУ ---
 
                     self.app.update_progress(f"Озвучка: {completed_audio_count}/{total_audio_chunks_expected}", queue_type=queue_type)
 

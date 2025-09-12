@@ -1049,86 +1049,51 @@ class TranslationApp:
         """Отримує статус конкретного кроку рерайт у вигляді тексту"""
         if not hasattr(self, 'task_completion_status'):
             return ""
-        
+
         status_key = f"rewrite_{task_index}_{lang_code}"
         if status_key not in self.task_completion_status:
             return ""
+
+        status_info = self.task_completion_status[status_key]
+        step_name_map = {
+            'transcribe': 'step_name_transcribe',
+            'rewrite': 'step_name_rewrite_text',
+            'cta': 'step_name_cta',
+            'gen_prompts': 'step_name_gen_prompts',
+            'gen_images': 'step_name_gen_images',
+            'audio': 'step_name_audio',
+            'create_subtitles': 'step_name_create_subtitles',
+            'create_video': 'step_name_create_video'
+        }
         
-        # Спеціальна обробка для різних типів кроків рерайт
-        if step_key == 'gen_images':
-            # Для зображень показуємо прогрес
-            status_info = self.task_completion_status[status_key]
-            total_images = status_info.get('total_images', 0)
-            generated_images = status_info.get('images_generated', 0)
-            if total_images > 0:
-                return f"{generated_images}/{total_images}"
+        step_name_key = self._t(step_name_map.get(step_key, ''))
+        
+        if not step_name_key or step_name_key not in status_info.get('steps', {}):
+             # Якщо ключ не знайдено або крок не для цього завдання, повертаємо порожній рядок
             return ""
-        
-        elif step_key == 'transcribe':
-            # Для транскрипції показуємо прогрес у форматі "3/5"
-            status_info = self.task_completion_status[status_key]
-            total_files = status_info.get('total_files', 0)
-            transcribed_files = status_info.get('transcribed_files', 0)
-            step_name = self._t(f'step_name_{step_key}')
-            if step_name in self.task_completion_status[status_key]['steps']:
-                status = self.task_completion_status[status_key]['steps'][step_name]
-                if status == "В процесі" and total_files > 0:
-                    return f"{transcribed_files}/{total_files}"
-                elif status == "Готово":
-                    return "Готово"
-                elif status == "Помилка":
-                    return "Помилка"
-            return ""
-        
-        elif step_key == 'audio':
-            # Для аудіо показуємо прогрес у форматі "3/3"
-            status_info = self.task_completion_status[status_key]
-            total_audio = status_info.get('total_audio', 0)
-            generated_audio = status_info.get('audio_generated', 0)
-            step_name = self._t(f'step_name_{step_key}')
-            if step_name in self.task_completion_status[status_key]['steps']:
-                status = self.task_completion_status[status_key]['steps'][step_name]
-                if status == "В процесі" and total_audio > 0:
-                    return f"{generated_audio}/{total_audio}"
-                elif status == "Готово":
-                    return "Готово"
-                elif status == "Помилка":
-                    return "Помилка"
-            return ""
-        
-        elif step_key == 'create_subtitles':
-            # Для субтитрів показуємо прогрес у форматі "2/3" (прив'язано до аудіо)
-            status_info = self.task_completion_status[status_key]
-            total_subs = status_info.get('total_subs', 0)
-            generated_subs = status_info.get('subs_generated', 0)
-            step_name = self._t(f'step_name_{step_key}')
-            if step_name in self.task_completion_status[status_key]['steps']:
-                status = self.task_completion_status[status_key]['steps'][step_name]
-                if status == "В процесі" and total_subs > 0:
-                    return f"{generated_subs}/{total_subs}"
-                elif status == "Готово":
-                    return "Готово"
-                elif status == "Помилка":
-                    return "Помилка"
-            return ""
-        
-        elif step_key in ['download', 'create_video']:
-            # Для інших файлових операцій показуємо прогрес
-            step_name = self._t(f'step_name_{step_key}')
-            if step_name in self.task_completion_status[status_key]['steps']:
-                status = self.task_completion_status[status_key]['steps'][step_name]
-                return status  # Повертаємо статус як є (Готово, Помилка, В процесі)
-            return ""
-        
-        elif step_key in ['rewrite_text', 'gen_text', 'cta', 'gen_prompts']:
-            # Для текстових операцій просто показуємо статус
-            step_name = self._t(f'step_name_{step_key}')
-            if step_name in self.task_completion_status[status_key]['steps']:
-                status = self.task_completion_status[status_key]['steps'][step_name]
-                return status  # Повертаємо статус як є (Готово, Помилка, В процесі)
-            return ""
-        
-        return ""
+
+        status = status_info['steps'][step_name_key]
+
+        # Динамічне відображення прогресу для конкретних кроків
+        if status == "В процесі":
+            if step_key == 'gen_images':
+                total = status_info.get('total_images', 0)
+                done = status_info.get('images_generated', 0)
+                return f"{done}/{total}" if total > 0 else status
+            elif step_key == 'transcribe':
+                total = status_info.get('total_files', 0)
+                done = status_info.get('transcribed_files', 0)
+                return f"{done}/{total}" if total > 0 else status
+            elif step_key == 'audio':
+                total = status_info.get('total_audio', 0)
+                done = status_info.get('audio_generated', 0)
+                return f"{done}/{total}" if total > 0 else status
+            elif step_key == 'create_subtitles':
+                total = status_info.get('total_subs', 0)
+                done = status_info.get('subs_generated', 0)
+                return f"{done}/{total}" if total > 0 else status
+
+        return status
     
     def _adjust_rewrite_queue_height(self):
         """Автоматично регулює висоту Treeview для черги рерайт завдань"""
