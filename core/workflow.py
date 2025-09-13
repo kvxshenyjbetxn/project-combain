@@ -192,12 +192,19 @@ class WorkflowManager:
             # Phase 1: Parallel text processing
             logger.info(f"Hybrid mode -> Phase 1: Parallel text processing for {len(queue_to_process)} tasks.")
             
-            text_step_names = ['rewrite_text', 'gen_text'] if is_rewrite else ['gen_text']
-            for step_name in text_step_names:
-                step_name_key = self.app._t('step_name_' + step_name)
-                for task_index, task in enumerate(queue_to_process):
-                    for lang_code in task['selected_langs']:
-                        status_key = self._get_status_key(task_index, lang_code, is_rewrite)
+            # Визначаємо, які текстові кроки будуть виконуватись
+            text_step_keys = ['rewrite_text'] if is_rewrite else ['translate']
+            
+            # Встановлюємо статус "В процесі" для основного текстового кроку
+            main_text_step_key = 'step_name_rewrite_text' if is_rewrite else 'step_name_translate'
+            step_name_key = self.app._t(main_text_step_key)
+            
+            for task_index, task in enumerate(queue_to_process):
+                for lang_code in task['selected_langs']:
+                    status_key = self._get_status_key(task_index, lang_code, is_rewrite)
+                    # Перевіряємо, чи крок увімкнено для цього завдання
+                    step_enabled_key = 'rewrite' if is_rewrite else 'translate'
+                    if task['steps'][lang_code].get(step_enabled_key):
                         if status_key in self.app.task_completion_status and step_name_key in self.app.task_completion_status[status_key]['steps']:
                             self.app.task_completion_status[status_key]['steps'][step_name_key] = "В процесі"
             
@@ -229,7 +236,14 @@ class WorkflowManager:
 
                 if status_key in self.app.task_completion_status:
                     if data.get('text_results'):
-                        steps_to_mark = ['rewrite_text', 'gen_text', 'cta', 'gen_prompts'] if is_rewrite else ['gen_text', 'cta', 'gen_prompts']
+                        # Маркуємо основний текстовий крок як "Готово" - ЦЕ ВИПРАВЛЕННЯ
+                        main_text_step_key = 'rewrite_text' if is_rewrite else 'translate'
+                        step_name_key_main = self.app._t(f'step_name_{main_text_step_key}')
+                        if step_name_key_main in self.app.task_completion_status[status_key]['steps']:
+                            self.app.task_completion_status[status_key]['steps'][step_name_key_main] = "Готово"
+
+                        # Маркуємо інші текстові кроки, які були успішними
+                        steps_to_mark = ['cta', 'gen_prompts']
                         for step in steps_to_mark:
                             step_name_key = self.app._t('step_name_' + step)
                             if step_name_key in self.app.task_completion_status[status_key]['steps']:
@@ -238,6 +252,7 @@ class WorkflowManager:
                         num_prompts = len(data['text_results'].get("prompts", []))
                         self.app.task_completion_status[status_key]["total_images"] = num_prompts
                     else:
+                        # Якщо текстова обробка впала, маркуємо всі кроки як помилку
                         for step_name in self.app.task_completion_status[status_key]['steps']:
                             self.app.task_completion_status[status_key]['steps'][step_name] = "Помилка"
 
@@ -416,14 +431,21 @@ class WorkflowManager:
             translation_path = os.path.join(output_path, "translation.txt")
 
             # Translation logic
+            step_name_key_translate = self.app._t('step_name_translate')
             if lang_steps.get('translate'):
+                if status_key in app.task_completion_status and step_name_key_translate in app.task_completion_status[status_key]['steps']:
+                    app.task_completion_status[status_key]['steps'][step_name_key_translate] = "В процесі"
+                    app.root.after(0, app.update_task_status_display)
+
                 translated_text = self.or_api.translate_text(task['input_text'], self.config["openrouter"]["translation_model"], self.config["openrouter"]["translation_params"], lang_name, custom_prompt_template=lang_config.get("prompt"))
                 if translated_text:
                     text_to_process = translated_text
                     with open(translation_path, 'w', encoding='utf-8') as f: f.write(translated_text)
                     app.increment_and_update_progress(queue_type)
+                    if status_key in app.task_completion_status: app.task_completion_status[status_key]['steps'][step_name_key_translate] = "Готово"
                 else:
                     logger.error(f"Translation failed for {lang_name}.")
+                    if status_key in app.task_completion_status: app.task_completion_status[status_key]['steps'][step_name_key_translate] = "Помилка"
                     return None
             elif os.path.exists(translation_path):
                  with open(translation_path, 'r', encoding='utf-8') as f: text_to_process = f.read()
