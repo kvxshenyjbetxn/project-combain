@@ -729,7 +729,19 @@ class TranslationApp:
                 messagebox.showwarning(self._t('warning_title'), self._t('warning_invalid_default_dir'))
                 return False
 
-        task_name = f"{self._t('task_label')} {len(self.task_queue) + 1}"
+        # --- Новий блок для діалогового вікна ---
+        default_task_name = f"{self._t('task_label')} {len(self.task_queue) + 1}"
+        dialog = CustomAskStringDialog(self.root, 
+                                       self._t('add_task_title', default="Введіть назву завдання"), 
+                                       self._t('add_task_prompt', default="Назва завдання:"), 
+                                       self, 
+                                       initial_value=default_task_name)
+        
+        task_name = dialog.result
+        if not task_name: # Користувач закрив вікно або залишив поле порожнім
+            return False
+        # --- Кінець нового блоку ---
+
         task_config = {
             "task_name": task_name,
             "input_text": self.input_text.get("1.0", tk.END).strip(),

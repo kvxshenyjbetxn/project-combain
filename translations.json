@@ -313,7 +313,9 @@
         "report_timing_per_language": "Після кожної мови",
         "auto_switch_service_label": "Авто-перемикання сервісу при помилці",
         "retry_limit_label": "Спроб до перемикання:",
-        "regenerate_alt_button": "Спробувати іншим сервісом"
+        "regenerate_alt_button": "Спробувати іншим сервісом",
+        "add_task_title": "Введіть назву завдання",
+        "add_task_prompt": "Назва завдання:"
     },
     "en": {
         "api_tab_label": "API",
@@ -627,6 +629,8 @@
         "report_timing_per_language": "After each language",
         "auto_switch_service_label": "Auto-switch service on failure",
         "retry_limit_label": "Retries before switch:",
-        "regenerate_alt_button": "Try with another service"
+        "regenerate_alt_button": "Try with another service",
+        "add_task_title": "Enter Task Name",
+        "add_task_prompt": "Task name:"
     }
 }
