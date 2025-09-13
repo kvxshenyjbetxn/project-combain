@@ -139,6 +139,7 @@ class TranslationApp:
         self.config = config
         self.translations = load_translations()
         self.lang = self.config.get("ui_settings", {}).get("language", "ua")
+        self.APP_BASE_PATH = APP_BASE_PATH # Додаємо константу як атрибут класу
         
         # Check dependencies first
         self._check_dependencies()
@@ -2446,12 +2447,7 @@ class TranslationApp:
 
 # Rewrite functionality
     def add_to_rewrite_queue(self):
-        video_folder = os.path.join(APP_BASE_PATH, "video")
-        if not os.path.isdir(video_folder):
-            os.makedirs(video_folder)
-            messagebox.showinfo(self._t('folder_created_title'), self._t('folder_created_message'))
-            return
-
+        # --- Універсальна логіка для мов та налаштувань ---
         selected_langs = [code for code, var in self.rewrite_lang_checkbuttons.items() if var.get()]
         if not selected_langs:
             messagebox.showwarning(self._t('warning_title'), self._t('warning_no_lang'))
@@ -2461,33 +2457,66 @@ class TranslationApp:
         if not output_cfg.get("rewrite_default_dir") or not os.path.isdir(output_cfg.get("rewrite_default_dir")):
             messagebox.showwarning(self._t('warning_title'), self._t('warning_invalid_rewrite_dir'))
             return
-        
-        self.processed_links = self.load_processed_links()
-        
-        new_files_found = 0
-        for filename in os.listdir(video_folder):
-            if filename.lower().endswith(".mp3") and filename not in self.processed_links:
-                file_path = os.path.join(video_folder, filename)
-                task_name = f"{self._t('rewrite_task_prefix')}: {os.path.splitext(filename)[0]}"
-                steps = {lang: {key: var.get() for key, var in self.rewrite_lang_step_vars[lang].items()} for lang in selected_langs}
 
-                task_config = {
-                    "type": "Rewrite", # Додаємо тип завдання
-                    "task_name": task_name,
-                    "mp3_path": file_path,
-                    "original_filename": filename,
-                    "selected_langs": selected_langs,
-                    "steps": steps,
-                    "timestamp": time.time(),
-                }
-                self.task_queue.append(task_config) # Додаємо до єдиної черги
-                new_files_found += 1
+        tasks_added = 0
+        
+        # --- Обробка посилань з текстового поля ---
+        links_text = self.rewrite_links_text.get("1.0", tk.END).strip()
+        if links_text:
+            links = [link.strip() for link in links_text.split('\n') if link.strip()]
+            if not links:
+                messagebox.showwarning(self._t('warning_title'), self._t('warning_no_links'))
+            else:
+                for link in links:
+                    task_name = f"{self._t('rewrite_task_prefix')}: {link}"
+                    steps = {lang: {key: var.get() for key, var in self.rewrite_lang_step_vars[lang].items()} for lang in selected_langs}
+                    
+                    task_config = {
+                        "type": "Rewrite",
+                        "source_type": "url", # Новий параметр для розрізнення
+                        "task_name": task_name,
+                        "url": link,
+                        "selected_langs": selected_langs,
+                        "steps": steps,
+                        "timestamp": time.time(),
+                    }
+                    self.task_queue.append(task_config)
+                    tasks_added += 1
 
-        if new_files_found > 0:
-            self.update_queue_display() # Оновлюємо єдине дерево
-            messagebox.showinfo(self._t('queue_title'), self._t('info_new_tasks_added', count=new_files_found))
+        # --- Обробка локальних файлів ---
+        video_folder = os.path.join(APP_BASE_PATH, "video")
+        if not os.path.isdir(video_folder):
+            os.makedirs(video_folder)
+            messagebox.showinfo(self._t('folder_created_title'), self._t('folder_created_message'))
         else:
-            messagebox.showinfo(self._t('queue_title'), self._t('info_no_new_files'))
+            self.processed_links = self.load_processed_links()
+            new_files_found = 0
+            for filename in os.listdir(video_folder):
+                if filename.lower().endswith(".mp3") and filename not in self.processed_links:
+                    file_path = os.path.join(video_folder, filename)
+                    task_name = f"{self._t('rewrite_task_prefix')}: {os.path.splitext(filename)[0]}"
+                    steps = {lang: {key: var.get() for key, var in self.rewrite_lang_step_vars[lang].items()} for lang in selected_langs}
+
+                    task_config = {
+                        "type": "Rewrite",
+                        "source_type": "local_file", # Новий параметр
+                        "task_name": task_name,
+                        "mp3_path": file_path,
+                        "original_filename": filename,
+                        "selected_langs": selected_langs,
+                        "steps": steps,
+                        "timestamp": time.time(),
+                    }
+                    self.task_queue.append(task_config)
+                    new_files_found += 1
+            tasks_added += new_files_found
+
+        # --- Фінальне повідомлення та оновлення ---
+        if tasks_added > 0:
+            self.update_queue_display()
+            messagebox.showinfo(self._t('queue_title'), self._t('info_new_tasks_added', count=tasks_added))
+        else:
+            messagebox.showinfo(self._t('queue_title'), self._t('info_no_new_files_or_links'))
 
     def load_links_from_file(self):
         filepath = filedialog.askopenfilename(title=self._t('load_from_file_button'), filetypes=[("Text files", "*.txt")])
@@ -2739,13 +2768,9 @@ class TranslationApp:
         else:
             progress_percent = 0.0
 
-        # Вибираємо правильні віджети GUI залежно від типу черги
-        if queue_type == 'rewrite':
-            progress_var = self.rewrite_progress_var
-            label_var = self.rewrite_progress_label_var
-        else:  # 'main'
-            progress_var = self.progress_var
-            label_var = self.progress_label_var
+        # Використовуємо єдиний прогрес-бар для всіх типів черг, оскільки вкладка одна
+        progress_var = self.progress_var
+        label_var = self.progress_label_var
 
         # Оновлюємо GUI в основному потоці
         self.root.after(0, lambda: progress_var.set(progress_percent))

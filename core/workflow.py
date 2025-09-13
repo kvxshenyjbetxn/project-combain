@@ -9,6 +9,8 @@ import time
 import re
 import queue
 from tkinter import messagebox
+import shutil
+import yt_dlp
 
 # Імпортуємо необхідні утиліти та функції
 from utils.file_utils import sanitize_filename, chunk_text, chunk_text_voicemaker, chunk_text_speechify
@@ -105,24 +107,39 @@ class WorkflowManager:
         self.app.total_individual_steps = 0
         num_chunks = self.config.get('parallel_processing', {}).get('num_chunks', 3)
 
+        # Для рерайт-черги, деякі кроки (завантаження, транскрипція) виконуються один раз на унікальний файл/посилання,
+        # а не на кожну мову. Треба їх порахувати окремо, щоб уникнути дублювання.
         if is_rewrite:
-            # Рахуємо унікальні файли для транскрипції
-            unique_files_to_transcribe = set()
+            unique_downloads = set()
+            unique_transcriptions = set()
             for task in queue_to_process_list:
-                # Припускаємо, що налаштування транскрипції однакове для всіх мов у завданні
-                if task['steps'][task['selected_langs'][0]].get('transcribe'):
-                    unique_files_to_transcribe.add(task['mp3_path'])
-            self.app.total_individual_steps += len(unique_files_to_transcribe)
+                first_lang_steps = task['steps'][task['selected_langs'][0]]
+                
+                # Рахуємо унікальні завантаження (тільки для URL)
+                if task.get('source_type') == 'url' and first_lang_steps.get('download'):
+                    unique_downloads.add(task.get('url'))
+                
+                # Рахуємо унікальні транскрипції
+                if first_lang_steps.get('transcribe'):
+                    identifier = task.get('mp3_path') or task.get('url')
+                    if identifier:
+                        unique_transcriptions.add(identifier)
+            
+            self.app.total_individual_steps += len(unique_downloads)
+            self.app.total_individual_steps += len(unique_transcriptions)
 
+        # Тепер рахуємо кроки, які виконуються для кожної мови
         for task in queue_to_process_list:
             for lang_code in task['selected_langs']:
                 steps = task['steps'][lang_code]
+                
                 if is_rewrite:
+                    # Кроки, специфічні для рерайту (за мовами)
                     if steps.get('rewrite'): self.app.total_individual_steps += 1
                 else: # main queue
                     if steps.get('translate'): self.app.total_individual_steps += 1
                 
-                # Спільні етапи
+                # Спільні етапи для обох черг (виконуються для кожної мови)
                 if steps.get('cta'): self.app.total_individual_steps += 1
                 if steps.get('gen_prompts'): self.app.total_individual_steps += 1
                 if steps.get('gen_images'): self.app.total_individual_steps += 1 # Вважаємо генерацію всіх зображень для однієї мови як 1 етап
@@ -156,22 +173,51 @@ class WorkflowManager:
 
             # Phase 0: Transcription (only for rewrite mode)
             if is_rewrite:
-                logger.info("Hybrid mode -> Phase 0: Sequential transcription of local files.")
-                step_name_key = self.app._t('step_name_transcribe')
+                logger.info("Hybrid mode -> Phase 0: Downloading and transcription.")
+                step_name_key_transcribe = self.app._t('step_name_transcribe')
+                step_name_key_download = self.app._t('step_name_download')
+
                 for task_index, task in enumerate(queue_to_process):
+                    # Встановлюємо статус "В процесі" для всіх активних кроків
                     for lang_code in task['selected_langs']:
                         status_key = self._get_status_key(task_index, lang_code, is_rewrite)
-                        if status_key in self.app.task_completion_status and step_name_key in self.app.task_completion_status[status_key]['steps']:
-                            self.app.task_completion_status[status_key]['steps'][step_name_key] = "В процесі"
+                        if status_key in self.app.task_completion_status:
+                            if step_name_key_transcribe in self.app.task_completion_status[status_key]['steps']:
+                                self.app.task_completion_status[status_key]['steps'][step_name_key_transcribe] = "В процесі"
+                            if task.get('source_type') == 'url' and step_name_key_download in self.app.task_completion_status[status_key]['steps']:
+                                self.app.task_completion_status[status_key]['steps'][step_name_key_download] = "В процесі"
                 
-                self.app.root.after(0, self.app.update_rewrite_task_status_display)
-                
+                self.app.root.after(0, self.app.update_task_status_display)
+
+                # Створюємо пул потоків для завантаження
+                download_threads = self.config.get("rewrite_settings", {}).get("download_threads", 4)
+                with concurrent.futures.ThreadPoolExecutor(max_workers=download_threads) as executor:
+                    download_futures = {executor.submit(self._video_download_worker, task): task for task in queue_to_process if task.get('source_type') == 'url'}
+                    
+                    for future in concurrent.futures.as_completed(download_futures):
+                        task = download_futures[future]
+                        result_path = future.result()
+                        task['mp3_path'] = result_path # Додаємо шлях до mp3
+                        
+                        # Оновлюємо статус завантаження
+                        for lang_code in task['selected_langs']:
+                            status_key = self._get_status_key(task['task_index'], lang_code, is_rewrite)
+                            if status_key in self.app.task_completion_status and step_name_key_download in self.app.task_completion_status[status_key]['steps']:
+                                self.app.task_completion_status[status_key]['steps'][step_name_key_download] = "Готово" if result_path else "Помилка"
+                        
+                        if result_path: self.app.increment_and_update_progress(queue_type)
+                        self.app.root.after(0, self.app.update_task_status_display)
+
+                # Послідовна транскрипція (після завантаження)
                 transcribed_texts = {}
                 rewrite_base_dir = self.config['output_settings']['rewrite_default_dir']
                 
                 for task in queue_to_process:
+                    # Пропускаємо, якщо завантаження не вдалось, або це не той тип завдання
+                    if 'mp3_path' not in task or not task['mp3_path']: continue
+                    
                     mp3_path = task['mp3_path']
-                    original_filename = task['original_filename']
+                    original_filename = task.get('original_filename', os.path.basename(mp3_path))
                     
                     if mp3_path not in transcribed_texts:
                         video_title = sanitize_filename(os.path.splitext(original_filename)[0])
@@ -193,24 +239,20 @@ class WorkflowManager:
                                 f.write(transcribed_text)
 
                         transcribed_texts[mp3_path] = {"text": transcribed_text, "title": video_title}
-                        
-                        # Збільшуємо лічильник прогресу після транскрипції унікального файлу
                         self.app.increment_and_update_progress(queue_type)
-                        self.app.root.after(0, self.app.update_rewrite_task_status_display)
 
+                # Оновлюємо завдання з транскрибованим текстом
                 for task in queue_to_process:
-                    if task['mp3_path'] in transcribed_texts:
+                    if 'mp3_path' in task and task['mp3_path'] in transcribed_texts:
                         task['transcribed_text'] = transcribed_texts[task['mp3_path']]['text']
                         task['video_title'] = transcribed_texts[task['mp3_path']]['title']
                         
-                        task_idx_str = task['task_index']
-                        step_name_key = self.app._t('step_name_transcribe')
                         for lang_code in task['selected_langs']:
-                            status_key = self._get_status_key(task_idx_str, lang_code, is_rewrite)
-                            if status_key in self.app.task_completion_status and step_name_key in self.app.task_completion_status[status_key]['steps']:
-                                self.app.task_completion_status[status_key]['steps'][step_name_key] = "Готово"
+                            status_key = self._get_status_key(task['task_index'], lang_code, is_rewrite)
+                            if status_key in self.app.task_completion_status and step_name_key_transcribe in self.app.task_completion_status[status_key]['steps']:
+                                self.app.task_completion_status[status_key]['steps'][step_name_key_transcribe] = "Готово"
                 
-                self.app.root.after(0, self.app.update_rewrite_task_status_display)
+                self.app.root.after(0, self.app.update_task_status_display)
 
             # Phase 1: Parallel text processing
             logger.info(f"Hybrid mode -> Phase 1: Parallel text processing for {len(queue_to_process)} tasks.")
@@ -411,15 +453,10 @@ class WorkflowManager:
             self.app.stop_telegram_polling.set()
             self.app._update_button_states(is_processing=False, is_image_stuck=False)
             
-            # Очищуємо черги після завершення обробки
-            if is_rewrite:
-                self.app.is_processing_rewrite_queue = False
-                self.app.rewrite_task_queue.clear()
-                self.app.root.after(0, self.app.update_rewrite_queue_display)
-            else:
-                self.app.is_processing_queue = False
-                self.app.task_queue.clear()
-                self.app.root.after(0, self.app.update_queue_display)
+            # Очищуємо єдину чергу після завершення обробки
+            self.app.is_processing_queue = False
+            self.app.task_queue.clear()
+            self.app.root.after(0, self.app.update_queue_display) # Оновлюємо єдиний дисплей
             
             if hasattr(self.app, 'pause_resume_button'):
                  self.app.root.after(0, lambda: self.app.pause_resume_button.config(text=self.app._t('pause_button'), state="disabled"))
@@ -953,6 +990,64 @@ class WorkflowManager:
             if self.audio_worker_pool:
                 self.audio_worker_pool.stop()
                 logger.info("[Audio/Subs Master] Пайплайн завершено, воркер пул зупинено.")
+                
+    def _video_download_worker(self, task):
+        """Завантажує відео, конвертує в mp3 та повертає шлях до файлу."""
+        try:
+            import yt_dlp
+
+            url = task['url']
+            rewrite_base_dir = self.config['output_settings']['rewrite_default_dir']
+            temp_download_dir = os.path.join(rewrite_base_dir, "temp_downloads")
+            os.makedirs(temp_download_dir, exist_ok=True)
+            
+            ydl_opts = {
+                'format': 'bestaudio/best',
+                'outtmpl': os.path.join(temp_download_dir, '%(title)s.%(ext)s'),
+                'postprocessors': [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'mp3',
+                    'preferredquality': '192',
+                }],
+                'quiet': True,
+                'noprogress': True,
+            }
+
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                video_title = info.get('title', 'video')
+                # Формуємо очікуваний шлях до mp3 файлу
+                original_filepath = ydl.prepare_filename(info)
+                base, _ = os.path.splitext(original_filepath)
+                final_mp3_path = base + '.mp3'
+            
+            if os.path.exists(final_mp3_path):
+                # Переміщуємо mp3 у постійну папку "video"
+                video_folder = os.path.join(self.app.APP_BASE_PATH, "video")
+                os.makedirs(video_folder, exist_ok=True)
+                
+                final_filename = f"{sanitize_filename(video_title)}.mp3"
+                destination_path = os.path.join(video_folder, final_filename)
+                
+                # Уникаємо перезапису
+                if os.path.exists(destination_path):
+                    logger.warning(f"Файл {final_filename} вже існує. Використовуємо існуючий.")
+                    os.remove(final_mp3_path) # Видаляємо щойно завантажений
+                    return destination_path
+
+                shutil.move(final_mp3_path, destination_path)
+                logger.info(f"Відео '{video_title}' успішно завантажено та конвертовано в {destination_path}")
+                
+                # Додаємо до списку оброблених, щоб не обробляти повторно
+                self.app.save_processed_link(final_filename)
+                
+                return destination_path
+            else:
+                logger.error(f"Не вдалося знайти конвертований mp3 файл для {url}")
+                return None
+        except Exception as e:
+            logger.exception(f"Помилка під час завантаження відео з {task.get('url', '')}: {e}")
+            return None
 
     def _concatenate_videos(self, app_instance, video_chunks, output_path):
         """Об'єднання відеофрагментів."""

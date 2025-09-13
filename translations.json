@@ -316,7 +316,8 @@
         "regenerate_alt_button": "Спробувати іншим сервісом",
         "add_task_title": "Введіть назву завдання",
         "add_task_prompt": "Назва завдання:",
-        "task_type_column": "Тип завдання"
+        "task_type_column": "Тип завдання",
+        "info_no_new_files_or_links": "Нових файлів чи посилань для обробки не знайдено."
     },
     "en": {
         "api_tab_label": "API",
@@ -633,6 +634,7 @@
         "regenerate_alt_button": "Try with another service",
         "add_task_title": "Enter Task Name",
         "add_task_prompt": "Task name:",
-        "task_type_column": "Task Type"
+        "task_type_column": "Task Type",
+        "info_no_new_files_or_links": "No new files or links to process were found."
     }
 }
