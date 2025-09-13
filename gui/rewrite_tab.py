@@ -114,26 +114,6 @@ def create_rewrite_tab(notebook, app):
     buttons_frame.pack(fill='x', padx=10, pady=5)
     ttk.Button(buttons_frame, text=app._t('add_to_queue_button'), command=app.add_to_rewrite_queue, bootstyle="info").pack(side='left', padx=5)
     
-    # Переносимо кнопки управління чергою на рівень з "Додати в чергу"
-    ttk.Button(buttons_frame, text=app._t('process_queue_button'), command=app.process_rewrite_queue, bootstyle="success").pack(side='left', padx=5)
-    
-    # Додаємо кнопку паузи для вкладки рерайт
-    app.rewrite_pause_resume_button = ttk.Button(buttons_frame, text=app._t('pause_button'), command=app.toggle_pause_resume, bootstyle="warning", state="disabled")
-    app.rewrite_pause_resume_button.pack(side='left', padx=5)
-    
-    ttk.Button(buttons_frame, text=app._t('clear_queue_button'), command=app.clear_rewrite_queue, bootstyle="danger").pack(side='left', padx=5)
-    
-    # Створюємо контейнер для прогрес-бару та відсотків на вкладці рерайту
-    rewrite_progress_container = ttk.Frame(app.rewrite_scrollable_frame)
-    rewrite_progress_container.pack(fill='x', padx=10, pady=5)
-
-    app.rewrite_progress_label_var = tk.StringVar(value="0%")
-    ttk.Label(rewrite_progress_container, textvariable=app.rewrite_progress_label_var, font=("Helvetica", 10, "bold"), width=5).pack(side='left')
-
-    app.rewrite_progress_var = tk.DoubleVar()
-    app.rewrite_progress_bar = ttk.Progressbar(rewrite_progress_container, variable=app.rewrite_progress_var, maximum=100, bootstyle="success-striped")
-    app.rewrite_progress_bar.pack(fill='x', expand=True, side='left', padx=(5, 0))
-    
     # Створюємо фрейм для кнопок
     rewrite_buttons_frame = ttk.Frame(app.rewrite_scrollable_frame)
     rewrite_buttons_frame.pack(pady=5)
@@ -182,30 +162,6 @@ def create_rewrite_tab(notebook, app):
     image_api_combo_rewrite.pack(side='left', padx=5)
     image_api_combo_rewrite.bind("<<ComboboxSelected>>", app._on_image_api_select)
     app.image_api_selectors.append(image_api_combo_rewrite)
-
-    queue_main_frame = ttk.Labelframe(app.rewrite_scrollable_frame, text=app._t('task_queue_tab'))
-    queue_main_frame.pack(fill='x', expand=True, padx=10, pady=10)
-
-
-    
-    queue_list_frame = ttk.Frame(queue_main_frame)
-    queue_list_frame.pack(fill='both', expand=True, padx=10, pady=5)
-    
-    columns = ("status", "time")
-    app.rewrite_queue_tree = ttk.Treeview(queue_list_frame, columns=columns, show='tree headings', height=10, bootstyle="dark")
-    app.rewrite_queue_tree.heading("#0", text=app._t('task_details_column'))
-    app.rewrite_queue_tree.column("#0", width=400, anchor='w')
-    app.rewrite_queue_tree.heading('status', text=app._t('queue_status_col'))
-    app.rewrite_queue_tree.column('status', width=100, anchor='w')
-    app.rewrite_queue_tree.heading('time', text=app._t('queue_time_col'))
-    app.rewrite_queue_tree.column('time', width=150, anchor='w')
-    
-    app.rewrite_queue_scrollbar = ttk.Scrollbar(queue_list_frame, orient="vertical", command=app.rewrite_queue_tree.yview)
-    app.dynamic_scrollbars.append(app.rewrite_queue_scrollbar)
-    app.rewrite_queue_tree.configure(yscrollcommand=app.rewrite_queue_scrollbar.set)
-    app.rewrite_queue_tree.pack(side="left", fill="both", expand=True)
-    app.rewrite_queue_scrollbar.pack(side="right", fill="y")
-    app.update_rewrite_queue_display()
 
     # --- Контейнер для галереї контролю зображень ---
     app.rewrite_image_gallery_frame = ttk.Labelframe(app.rewrite_scrollable_frame, text=app._t('image_control_gallery_label'))

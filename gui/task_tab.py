@@ -173,25 +173,6 @@ def create_task_tab(notebook, app):
     buttons_frame.pack(fill='x', padx=10, pady=5)
     
     ttk.Button(buttons_frame, text=app._t('add_to_queue_button'), command=app.add_to_queue, bootstyle="info").pack(side='left', padx=5)
-    
-    # Переносимо кнопки управління чергою на рівень з "Додати в чергу"
-    ttk.Button(buttons_frame, text=app._t('process_queue_button'), command=app.process_queue, bootstyle="success").pack(side='left', padx=5)
-    
-    app.pause_resume_button = ttk.Button(buttons_frame, text=app._t('pause_button'), command=app.toggle_pause_resume, bootstyle="warning", state="disabled")
-    app.pause_resume_button.pack(side='left', padx=5)
-    
-    ttk.Button(buttons_frame, text=app._t('clear_queue_button'), command=app.clear_queue, bootstyle="danger").pack(side='left', padx=5)
-    
-    # Створюємо контейнер для прогрес-бару та відсотків
-    progress_container = ttk.Frame(app.chain_scrollable_frame)
-    progress_container.pack(fill='x', padx=10, pady=5)
-
-    app.progress_label_var = tk.StringVar(value="0%")
-    ttk.Label(progress_container, textvariable=app.progress_label_var, font=("Helvetica", 10, "bold"), width=5).pack(side='left')
-
-    app.progress_var = tk.DoubleVar()
-    app.progress_bar = ttk.Progressbar(progress_container, variable=app.progress_var, maximum=100, bootstyle="success-striped")
-    app.progress_bar.pack(fill='x', expand=True, side='left', padx=(5, 0))
     # Створюємо фрейм для кнопок під прогрес-баром
     chain_buttons_frame = ttk.Frame(app.chain_scrollable_frame)
     chain_buttons_frame.pack(pady=5)
@@ -240,44 +221,6 @@ def create_task_tab(notebook, app):
     image_api_combo_chain.pack(side='left', padx=5)
     image_api_combo_chain.bind("<<ComboboxSelected>>", app._on_image_api_select)
     app.image_api_selectors.append(image_api_combo_chain)
-    
-    queue_main_frame = ttk.Labelframe(app.chain_scrollable_frame, text=app._t('task_queue_tab'))
-    queue_main_frame.pack(fill='x', expand=True, padx=10, pady=10)
-
-
-    
-    queue_list_frame = ttk.Frame(queue_main_frame)
-    queue_list_frame.pack(fill='both', expand=True, padx=10, pady=5)
-    
-    columns = ("status", "time")
-    app.queue_tree = ttk.Treeview(queue_list_frame, columns=columns, show='tree headings', bootstyle="dark")
-    
-    # Початкова висота - використовуємо збережену або мінімальну за замовчуванням
-    saved_height = app.config.get("ui_settings", {}).get("queue_height", 5)
-    app.queue_tree.configure(height=saved_height)
-    
-    style = ttk.Style()
-    style.configure("Treeview.Heading", relief="groove", borderwidth=1, padding=(5,5))
-    
-    saved_widths = app.config.get("ui_settings", {}).get("queue_column_widths", {})
-    
-    app.queue_tree.heading("#0", text=app._t('task_details_column'))
-    app.queue_tree.column("#0", width=saved_widths.get('task_details', 400), anchor='w')
-    
-    app.queue_tree.heading('status', text=app._t('queue_status_col'))
-    app.queue_tree.column('status', width=saved_widths.get('status', 100), anchor='w')
-    app.queue_tree.heading('time', text=app._t('queue_time_col'))
-    app.queue_tree.column('time', width=saved_widths.get('time', 150), anchor='w')
-
-    app.queue_scrollbar = ttk.Scrollbar(queue_list_frame, orient="vertical", command=app.queue_tree.yview)
-    app.dynamic_scrollbars.append(app.queue_scrollbar)
-    app.queue_tree.configure(yscrollcommand=app.queue_scrollbar.set)
-    app.queue_tree.pack(side="left", fill="both", expand=True)
-    app.queue_scrollbar.pack(side="right", fill="y")
-    
-    app.queue_tree.bind("<Double-1>", app.edit_task_name)
-    
-    app.update_queue_display()
 
     # --- Контейнер для галереї контролю зображень ---
     app.chain_image_gallery_frame = ttk.Labelframe(app.chain_scrollable_frame, text=app._t('image_control_gallery_label'))

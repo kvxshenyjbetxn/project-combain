@@ -48,6 +48,29 @@ class WorkflowManager:
             logger.info("Зупинка аудіо воркер пулу...")
             self.audio_worker_pool.stop()
             self.audio_worker_pool = None
+            
+    def process_unified_queue(self, unified_queue):
+        """
+        Послідовно обробляє завдання з єдиної черги, викликаючи відповідний
+        воркер залежно від типу завдання.
+        """
+        # Створюємо копію черги для безпечної ітерації
+        queue_to_process = list(unified_queue)
+
+        for task in queue_to_process:
+            if not self.app._check_app_state():
+                logger.warning("Обробку черги зупинено користувачем.")
+                break
+            
+            task_type = task.get('type')
+            queue_type_arg = 'main' if task_type == 'Translate' else 'rewrite'
+            
+            logger.info(f"Початок обробки завдання типу '{task_type}': {task.get('task_name')}")
+            # _process_hybrid_queue очікує список завдань, тому передаємо поточне завдання в списку
+            self._process_hybrid_queue([task], queue_type_arg)
+            logger.info(f"Завершено обробку завдання: {task.get('task_name')}")
+        
+        logger.info("Обробку всіх завдань у єдиній черзі завершено.")
 
     def _process_hybrid_queue(self, queue_to_process_list, queue_type):
         is_rewrite = queue_type == 'rewrite'

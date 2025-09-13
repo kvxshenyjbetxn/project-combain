@@ -315,7 +315,8 @@
         "retry_limit_label": "Спроб до перемикання:",
         "regenerate_alt_button": "Спробувати іншим сервісом",
         "add_task_title": "Введіть назву завдання",
-        "add_task_prompt": "Назва завдання:"
+        "add_task_prompt": "Назва завдання:",
+        "task_type_column": "Тип завдання"
     },
     "en": {
         "api_tab_label": "API",
@@ -631,6 +632,7 @@
         "retry_limit_label": "Retries before switch:",
         "regenerate_alt_button": "Try with another service",
         "add_task_title": "Enter Task Name",
-        "add_task_prompt": "Task name:"
+        "add_task_prompt": "Task name:",
+        "task_type_column": "Task Type"
     }
 }
