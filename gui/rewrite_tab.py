@@ -114,43 +114,10 @@ def create_rewrite_tab(notebook, app):
     buttons_frame.pack(fill='x', padx=10, pady=5)
     ttk.Button(buttons_frame, text=app._t('add_to_queue_button'), command=app.add_to_rewrite_queue, bootstyle="info").pack(side='left', padx=5)
     
-    # Створюємо фрейм для кнопок
+    # --- Frame for image generation API selector ---
     rewrite_buttons_frame = ttk.Frame(app.rewrite_scrollable_frame)
     rewrite_buttons_frame.pack(pady=5)
 
-    skip_image_button_rewrite = ttk.Button(
-        rewrite_buttons_frame,
-        text=app._t('skip_image_button'),
-        command=app._on_skip_image_click,
-        bootstyle="warning",
-        state="disabled"
-    )
-    skip_image_button_rewrite.pack(side='left', padx=5)
-    app.skip_image_buttons.append(skip_image_button_rewrite)
-
-    # Нова кнопка для перемикання сервісу
-    switch_service_button_rewrite = ttk.Button(
-        rewrite_buttons_frame,
-        text=app._t('switch_service_button'),
-        command=app._on_switch_service_click,
-        bootstyle="info",
-        state="disabled"
-    )
-    switch_service_button_rewrite.pack(side='left', padx=5)
-    app.switch_service_buttons.append(switch_service_button_rewrite)
-
-    # --- Нова кнопка регенерації іншим сервісом ---
-    regenerate_alt_button_rewrite = ttk.Button(
-        rewrite_buttons_frame,
-        text=app._t('regenerate_alt_button'),
-        command=app._on_regenerate_alt_click,
-        bootstyle="success",
-        state="disabled"
-    )
-    regenerate_alt_button_rewrite.pack(side='left', padx=5)
-    app.regenerate_alt_buttons.append(regenerate_alt_button_rewrite)
-
-    # --- Новий вибір API ---
     ttk.Label(rewrite_buttons_frame, text=f"{app._t('image_api_label')}:").pack(side='left', padx=(10, 2))
     image_api_combo_rewrite = ttk.Combobox(
         rewrite_buttons_frame, 

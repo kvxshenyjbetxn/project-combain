@@ -30,6 +30,40 @@ def create_queue_tab(notebook, app):
     app.progress_bar = ttk.Progressbar(progress_container, variable=app.progress_var, maximum=100, bootstyle="success-striped")
     app.progress_bar.pack(fill='x', expand=True, side='left', padx=(5, 0))
 
+    # Frame for image generation control buttons
+    image_control_frame = ttk.Frame(app.queue_scrollable_frame)
+    image_control_frame.pack(pady=5)
+
+    skip_image_button = ttk.Button(
+        image_control_frame,
+        text=app._t('skip_image_button'),
+        command=app._on_skip_image_click,
+        bootstyle="warning",
+        state="disabled"
+    )
+    skip_image_button.pack(side='left', padx=5)
+    app.skip_image_buttons.append(skip_image_button)
+
+    switch_service_button = ttk.Button(
+        image_control_frame,
+        text=app._t('switch_service_button'),
+        command=app._on_switch_service_click,
+        bootstyle="info",
+        state="disabled"
+    )
+    switch_service_button.pack(side='left', padx=5)
+    app.switch_service_buttons.append(switch_service_button)
+
+    regenerate_alt_button = ttk.Button(
+        image_control_frame,
+        text=app._t('regenerate_alt_button'),
+        command=app._on_regenerate_alt_click,
+        bootstyle="success",
+        state="disabled"
+    )
+    regenerate_alt_button.pack(side='left', padx=5)
+    app.regenerate_alt_buttons.append(regenerate_alt_button)
+
     queue_main_frame = ttk.Labelframe(app.queue_scrollable_frame, text=app._t('task_queue_label'))
     queue_main_frame.pack(fill='both', expand=True, padx=10, pady=10)
 
