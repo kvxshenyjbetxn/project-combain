@@ -56,23 +56,45 @@ class WorkflowManager:
         Послідовно обробляє завдання з єдиної черги, викликаючи відповідний
         воркер залежно від типу завдання.
         """
-        # Створюємо копію черги для безпечної ітерації
-        queue_to_process = list(unified_queue)
-
-        for task in queue_to_process:
-            if not self.app._check_app_state():
-                logger.warning("Обробку черги зупинено користувачем.")
-                break
-            
-            task_type = task.get('type')
-            queue_type_arg = 'main' if task_type == 'Translate' else 'rewrite'
-            
-            logger.info(f"Початок обробки завдання типу '{task_type}': {task.get('task_name')}")
-            # _process_hybrid_queue очікує список завдань, тому передаємо поточне завдання в списку
-            self._process_hybrid_queue([task], queue_type_arg)
-            logger.info(f"Завершено обробку завдання: {task.get('task_name')}")
+        # Встановлюємо глобальний статус обробки на початку
+        self.app.is_processing_queue = True
+        self.app._update_button_states(is_processing=True, is_image_stuck=False)
+        if hasattr(self.app, 'pause_resume_button'):
+             self.app.root.after(0, lambda: self.app.pause_resume_button.config(state="normal"))
         
-        logger.info("Обробку всіх завдань у єдиній черзі завершено.")
+        try:
+            # Створюємо копію черги для безпечної ітерації
+            queue_to_process = list(unified_queue)
+
+            for i, task in enumerate(queue_to_process):
+                if not self.app._check_app_state():
+                    logger.warning("Обробку черги зупинено користувачем.")
+                    break
+                
+                task_type = task.get('type')
+                queue_type_arg = 'main' if task_type == 'Translate' else 'rewrite'
+                
+                logger.info(f"Початок обробки завдання {i+1}/{len(queue_to_process)} типу '{task_type}': {task.get('task_name')}")
+                # _process_hybrid_queue тепер просто виконує одне завдання без завершення всієї черги
+                self._process_hybrid_queue([task], queue_type_arg)
+                logger.info(f"Завершено обробку завдання: {task.get('task_name')}")
+            
+            # Якщо обробка не була перервана користувачем, показуємо фінальне повідомлення
+            if self.app._check_app_state():
+                logger.info("Обробку всіх завдань у єдиній черзі завершено.")
+                self.app.root.after(0, lambda: messagebox.showinfo(self.app._t('queue_title'), self.app._t('info_queue_complete')))
+
+        except Exception as e:
+            logger.exception(f"CRITICAL ERROR: Unexpected error in unified queue processing: {e}")
+            self.app.root.after(0, lambda: messagebox.showerror(self.app._t('error_title'), self.app._t('error_unexpected_queue')))
+        finally:
+            # Завершуємо та скидаємо всі стани тільки після виходу з циклу
+            self.app.is_processing_queue = False
+            self.app._update_button_states(is_processing=False, is_image_stuck=False)
+            self.app.root.after(0, self.app.update_queue_display)
+            if hasattr(self.app, 'pause_resume_button'):
+                 self.app.root.after(0, lambda: self.app.pause_resume_button.config(text=self.app._t('pause_button'), state="disabled"))
+            self.app.pause_event.set()
 
     def _process_hybrid_queue(self, queue_to_process_list, queue_type):
         is_rewrite = queue_type == 'rewrite'
@@ -462,33 +484,25 @@ class WorkflowManager:
             # Встановлюємо прогрес-бар на 100% після завершення
             self.app.completed_individual_steps = self.app.total_individual_steps
             self.app.update_individual_progress(queue_type)
-            self.app.root.after(0, lambda: messagebox.showinfo(self.app._t('queue_title'), self.app._t('info_queue_complete')))
+            # Спливаюче вікно про завершення перенесено в process_unified_queue
 
         except Exception as e:
             logger.exception(f"CRITICAL ERROR: Unexpected error in hybrid queue processing: {e}")
-        finally:
-            # Cleanup temporary files
-            if not self.config.get('parallel_processing', {}).get('keep_temp_files', False):
-                for data in processing_data.values():
-                    if 'temp_dir' in data and os.path.exists(data['temp_dir']):
-                        try:
-                            shutil.rmtree(data['temp_dir'])
-                            logger.info(f"Cleaned temporary directory: {data['temp_dir']}")
-                        except Exception as e:
-                            logger.error(f"Failed to delete temporary directory {data['temp_dir']}: {e}")
+        
+        # Блок finally видалено, щоб уникнути передчасного завершення.
+        # Очищення тимчасових файлів та інші дії тепер відбуваються після кожного завдання.
+        
+        if not self.config.get('parallel_processing', {}).get('keep_temp_files', False):
+            for data in processing_data.values():
+                if 'temp_dir' in data and os.path.exists(data['temp_dir']):
+                    try:
+                        shutil.rmtree(data['temp_dir'])
+                        logger.info(f"Cleaned temporary directory: {data['temp_dir']}")
+                    except Exception as e:
+                        logger.error(f"Failed to delete temporary directory {data['temp_dir']}: {e}")
 
-            self.app.stop_telegram_polling.set()
-            self.app._update_button_states(is_processing=False, is_image_stuck=False)
-            
-            # Завершуємо обробку, АЛЕ НЕ очищуємо чергу
-            self.app.is_processing_queue = False
-            self.app.root.after(0, self.app.update_queue_display) 
-            
-            if hasattr(self.app, 'pause_resume_button'):
-                 self.app.root.after(0, lambda: self.app.pause_resume_button.config(text=self.app._t('pause_button'), state="disabled"))
-            if hasattr(self.app, 'rewrite_pause_resume_button'):
-                 self.app.root.after(0, lambda: self.app.rewrite_pause_resume_button.config(text=self.app._t('pause_button'), state="disabled"))
-            self.app.pause_event.set()
+        # Зупиняємо поллінг телеграму після кожного завдання, він буде перезапущений для наступного
+        self.app.stop_telegram_polling.set()
 
     def _text_processing_worker(self, app, task, lang_code, queue_type):
         """Execute all text operations for a single language task."""
@@ -1034,6 +1048,7 @@ class WorkflowManager:
             temp_download_dir = os.path.join(rewrite_base_dir, "temp_downloads")
             os.makedirs(temp_download_dir, exist_ok=True)
             
+            # Більш надійна конфігурація, що базується на прикладі з проекту "app"
             ydl_opts = {
                 'format': 'bestaudio/best',
                 'outtmpl': os.path.join(temp_download_dir, '%(title)s.%(ext)s'),
@@ -1044,10 +1059,30 @@ class WorkflowManager:
                 }],
                 'quiet': True,
                 'noprogress': True,
+                'ignoreerrors': True,
+                'nocheckcertificate': True,  # Додано для уникнення проблем з сертифікатами
+                'retries': 10,               # Додано спроби повторного завантаження
+                'fragment_retries': 10,      # Додано спроби повторного завантаження фрагментів
+                'socket_timeout': 30,        # Додано таймаут сокета
             }
+
+            # Додаємо підтримку cookies з файлу конфігурації, як в "app"
+            # Щоб це працювало, додайте налаштування "use_cookies": true та "cookies_path": "шлях/до/вашого/cookies.txt"
+            # у секцію "rewrite_settings" вашого файлу конфігурації.
+            if self.config.get("rewrite_settings", {}).get("use_cookies", False):
+                cookie_path = self.config.get("rewrite_settings", {}).get("cookies_path", "")
+                if cookie_path and os.path.exists(cookie_path):
+                    ydl_opts['cookiefile'] = cookie_path
+                    logger.info(f"Використовується файл cookies: {cookie_path}")
+                else:
+                    logger.warning("Увімкнено використання cookies, але шлях до файлу не вказано або файл не знайдено.")
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
+                if not info:
+                    logger.error(f"Не вдалося завантажити інформацію для URL: {url}")
+                    return None
+
                 video_title = info.get('title', 'video')
                 # Формуємо очікуваний шлях до mp3 файлу
                 original_filepath = ydl.prepare_filename(info)
@@ -1065,7 +1100,12 @@ class WorkflowManager:
                 # Уникаємо перезапису
                 if os.path.exists(destination_path):
                     logger.warning(f"Файл {final_filename} вже існує. Використовуємо існуючий.")
-                    os.remove(final_mp3_path) # Видаляємо щойно завантажений
+                    # Видаляємо щойно завантажений, якщо він в тимчасовій папці
+                    if temp_download_dir in final_mp3_path:
+                        try:
+                            os.remove(final_mp3_path)
+                        except OSError as e:
+                            logger.error(f"Не вдалося видалити тимчасовий файл {final_mp3_path}: {e}")
                     return destination_path
 
                 shutil.move(final_mp3_path, destination_path)
@@ -1076,10 +1116,14 @@ class WorkflowManager:
                 
                 return destination_path
             else:
-                logger.error(f"Не вдалося знайти конвертований mp3 файл для {url}")
+                logger.error(f"Не вдалося знайти конвертований mp3 файл для {url}. Можливо, сталася помилка під час завантаження або конвертації.")
                 return None
+        except yt_dlp.utils.DownloadError as e:
+            # Більш детальний вивід помилок yt-dlp
+            logger.error(f"Помилка завантаження yt-dlp для {task.get('url', '')}: {e}")
+            return None
         except Exception as e:
-            logger.exception(f"Помилка під час завантаження відео з {task.get('url', '')}: {e}")
+            logger.exception(f"Критична помилка під час завантаження відео з {task.get('url', '')}: {e}")
             return None
 
     def _concatenate_videos(self, app_instance, video_chunks, output_path):
