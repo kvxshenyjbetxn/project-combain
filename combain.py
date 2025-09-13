@@ -2673,6 +2673,7 @@ class TranslationApp:
 
         status_info = self.task_completion_status[status_key]
         step_name_map = {
+            'download': 'step_name_download',
             'transcribe': 'step_name_transcribe',
             'rewrite': 'step_name_rewrite_text',
             'cta': 'step_name_cta',
@@ -2686,33 +2687,32 @@ class TranslationApp:
         step_name_key = self._t(step_name_map.get(step_key, ''))
         
         if not step_name_key or step_name_key not in status_info.get('steps', {}):
-             # Якщо ключ не знайдено або крок не для цього завдання, повертаємо порожній рядок
             return ""
 
         status = status_info['steps'][step_name_key]
 
-        # Динамічне відображення прогресу для конкретних кроків
+        # Спеціальна логіка для кроків з лічильником
+        if step_key == 'audio':
+            total = status_info.get('total_audio', 0)
+            done = status_info.get('audio_generated', 0)
+            if total > 0:
+                return f"{done}/{total}"
+        
+        if step_key == 'create_subtitles':
+            total = status_info.get('total_subs', 0)
+            done = status_info.get('subs_generated', 0)
+            if total > 0:
+                return f"{done}/{total}"
+
+        # Динамічне відображення для кроків у статусі "В процесі"
         if status == "В процесі":
             if step_key == 'gen_images':
                 total = status_info.get('total_images', 0)
                 done = status_info.get('images_generated', 0)
                 return f"{done}/{total}" if total > 0 else status
-            elif step_key == 'transcribe':
-                total = status_info.get('total_files', 0)
-                done = status_info.get('transcribed_files', 0)
-                return f"{done}/{total}" if total > 0 else status
-            elif step_key == 'audio':
-                total = status_info.get('total_audio', 0)
-                done = status_info.get('audio_generated', 0)
-                return f"{done}/{total}" if total > 0 else status
-            elif step_key == 'create_subtitles':
-                total = status_info.get('total_subs', 0)
-                done = status_info.get('subs_generated', 0)
-                return f"{done}/{total}" if total > 0 else status
             elif step_key == 'create_video':
                 with self.video_progress_lock:
                     task_key_tuple = (task_index, lang_code)
-                    # Для рерайту ключ у video_chunk_progress буде такий самий
                     progress_dict = self.video_chunk_progress.get(task_key_tuple, {})
                     if progress_dict:
                         avg_progress = sum(progress_dict.values()) / len(progress_dict)

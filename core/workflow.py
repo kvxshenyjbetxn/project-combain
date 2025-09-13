@@ -177,29 +177,38 @@ class WorkflowManager:
                 step_name_key_transcribe = self.app._t('step_name_transcribe')
                 step_name_key_download = self.app._t('step_name_download')
 
+                # Ініціалізуємо статуси для Завантаження та Транскрипції як "Очікує"
                 for task_index, task in enumerate(queue_to_process):
-                    # Встановлюємо статус "В процесі" для всіх активних кроків
                     for lang_code in task['selected_langs']:
                         status_key = self._get_status_key(task_index, lang_code, is_rewrite)
                         if status_key in self.app.task_completion_status:
+                            if step_name_key_download in self.app.task_completion_status[status_key]['steps']:
+                                self.app.task_completion_status[status_key]['steps'][step_name_key_download] = "Очікує"
                             if step_name_key_transcribe in self.app.task_completion_status[status_key]['steps']:
-                                self.app.task_completion_status[status_key]['steps'][step_name_key_transcribe] = "В процесі"
-                            if task.get('source_type') == 'url' and step_name_key_download in self.app.task_completion_status[status_key]['steps']:
-                                self.app.task_completion_status[status_key]['steps'][step_name_key_download] = "В процесі"
-                
+                                self.app.task_completion_status[status_key]['steps'][step_name_key_transcribe] = "Очікує"
                 self.app.root.after(0, self.app.update_task_status_display)
 
-                # Створюємо пул потоків для завантаження
+                # Завантаження
                 download_threads = self.config.get("rewrite_settings", {}).get("download_threads", 4)
                 with concurrent.futures.ThreadPoolExecutor(max_workers=download_threads) as executor:
-                    download_futures = {executor.submit(self._video_download_worker, task): task for task in queue_to_process if task.get('source_type') == 'url'}
+                    tasks_to_download = [task for task in queue_to_process if task.get('source_type') == 'url']
+                    
+                    # Встановлюємо "В процесі" для завдань, які будуть завантажуватись
+                    for task in tasks_to_download:
+                        for lang_code in task['selected_langs']:
+                            status_key = self._get_status_key(task['task_index'], lang_code, is_rewrite)
+                            if status_key in self.app.task_completion_status and step_name_key_download in self.app.task_completion_status[status_key]['steps']:
+                                self.app.task_completion_status[status_key]['steps'][step_name_key_download] = "В процесі"
+                    if tasks_to_download:
+                        self.app.root.after(0, self.app.update_task_status_display)
+
+                    download_futures = {executor.submit(self._video_download_worker, task): task for task in tasks_to_download}
                     
                     for future in concurrent.futures.as_completed(download_futures):
                         task = download_futures[future]
                         result_path = future.result()
-                        task['mp3_path'] = result_path # Додаємо шлях до mp3
+                        task['mp3_path'] = result_path
                         
-                        # Оновлюємо статус завантаження
                         for lang_code in task['selected_langs']:
                             status_key = self._get_status_key(task['task_index'], lang_code, is_rewrite)
                             if status_key in self.app.task_completion_status and step_name_key_download in self.app.task_completion_status[status_key]['steps']:
@@ -207,15 +216,31 @@ class WorkflowManager:
                         
                         if result_path: self.app.increment_and_update_progress(queue_type)
                         self.app.root.after(0, self.app.update_task_status_display)
+                
+                # Встановлюємо "Готово" для локальних файлів, які не потребували завантаження
+                for task in queue_to_process:
+                    if task.get('source_type') == 'local_file':
+                        for lang_code in task['selected_langs']:
+                            status_key = self._get_status_key(task['task_index'], lang_code, is_rewrite)
+                            if status_key in self.app.task_completion_status and step_name_key_download in self.app.task_completion_status[status_key]['steps']:
+                                self.app.task_completion_status[status_key]['steps'][step_name_key_download] = "Готово"
+                self.app.root.after(0, self.app.update_task_status_display)
 
-                # Послідовна транскрипція (після завантаження)
+                # Транскрипція
                 transcribed_texts = {}
                 rewrite_base_dir = self.config['output_settings']['rewrite_default_dir']
                 
-                for task in queue_to_process:
-                    # Пропускаємо, якщо завантаження не вдалось, або це не той тип завдання
-                    if 'mp3_path' not in task or not task['mp3_path']: continue
-                    
+                tasks_to_transcribe = [task for task in queue_to_process if 'mp3_path' in task and task['mp3_path']]
+                
+                for task in tasks_to_transcribe:
+                    for lang_code in task['selected_langs']:
+                        status_key = self._get_status_key(task['task_index'], lang_code, is_rewrite)
+                        if status_key in self.app.task_completion_status and step_name_key_transcribe in self.app.task_completion_status[status_key]['steps']:
+                            self.app.task_completion_status[status_key]['steps'][step_name_key_transcribe] = "В процесі"
+                if tasks_to_transcribe:
+                    self.app.root.after(0, self.app.update_task_status_display)
+
+                for task in tasks_to_transcribe:
                     mp3_path = task['mp3_path']
                     original_filename = task.get('original_filename', os.path.basename(mp3_path))
                     
@@ -415,7 +440,8 @@ class WorkflowManager:
                         logger.info(f"УСПІХ: Створено фінальне відео: {final_video_path}")
                         if status_key in self.app.task_completion_status:
                             self.app.task_completion_status[status_key]['steps'][self.app._t('step_name_create_video')] = "Готово"
-                        if is_rewrite: self.app.save_processed_link(data['task']['original_filename'])
+                        if is_rewrite and 'original_filename' in data['task']:
+                            self.app.save_processed_link(data['task']['original_filename'])
                     else:
                         if status_key in self.app.task_completion_status:
                             self.app.task_completion_status[status_key]['steps'][self.app._t('step_name_create_video')] = "Помилка"
@@ -966,7 +992,7 @@ class WorkflowManager:
                 except queue.Empty:
                     continue
 
-            # Фінальне оновлення статусів
+            # Фінальне оновлення статусів (тільки для помилок)
             for tk, info in tasks_info.items():
                 if 'subs_chunks' in info['data']: info['data']['subs_chunks'].sort()
                 if 'audio_chunks' in info['data']: info['data']['audio_chunks'].sort()
@@ -979,8 +1005,11 @@ class WorkflowManager:
                     total_subs = self.app.task_completion_status[status_key].get('total_subs', 0)
                     generated_subs = self.app.task_completion_status[status_key].get('subs_generated', 0)
                     
-                    self.app.task_completion_status[status_key]['steps'][self.app._t('step_name_audio')] = "Готово" if generated_audio >= total_audio and total_audio > 0 else "Помилка"
-                    self.app.task_completion_status[status_key]['steps'][self.app._t('step_name_create_subtitles')] = "Готово" if generated_subs >= total_subs and total_subs > 0 else "Помилка"
+                    if total_audio > 0 and generated_audio < total_audio:
+                        self.app.task_completion_status[status_key]['steps'][self.app._t('step_name_audio')] = "Помилка"
+                    
+                    if total_subs > 0 and generated_subs < total_subs:
+                        self.app.task_completion_status[status_key]['steps'][self.app._t('step_name_create_subtitles')] = "Помилка"
 
             if is_rewrite: self.app.root.after(0, self.app.update_rewrite_task_status_display)
             else: self.app.root.after(0, self.app.update_task_status_display)
