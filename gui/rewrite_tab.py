@@ -35,9 +35,12 @@ def add_rewrite_lang_widgets(app, lang_code):
     
     steps = {
         'transcribe': app._t('step_transcribe'),
-        'rewrite': app._t('step_rewrite'), 'cta': app._t('step_cta'), 
-        'gen_prompts': app._t('step_gen_prompts'), 'gen_images': app._t('step_gen_images'), 
-        'audio': app._t('step_audio'), 'create_subtitles': app._t('step_create_subtitles'),
+        'rewrite': app._t('step_rewrite'), 
+        'cta': app._t('step_cta'), 
+        'gen_prompts': app._t('step_gen_prompts'), 
+        'gen_images': app._t('step_gen_images'), 
+        'audio': app._t('step_audio'), 
+        'create_subtitles': app._t('step_create_subtitles'),
         'create_video': app._t('step_create_video')
     }
     
@@ -111,6 +114,26 @@ def create_rewrite_tab(notebook, app):
     buttons_frame.pack(fill='x', padx=10, pady=5)
     ttk.Button(buttons_frame, text=app._t('add_to_queue_button'), command=app.add_to_rewrite_queue, bootstyle="info").pack(side='left', padx=5)
     
+    # Переносимо кнопки управління чергою на рівень з "Додати в чергу"
+    ttk.Button(buttons_frame, text=app._t('process_queue_button'), command=app.process_rewrite_queue, bootstyle="success").pack(side='left', padx=5)
+    
+    # Додаємо кнопку паузи для вкладки рерайт
+    app.rewrite_pause_resume_button = ttk.Button(buttons_frame, text=app._t('pause_button'), command=app.toggle_pause_resume, bootstyle="warning", state="disabled")
+    app.rewrite_pause_resume_button.pack(side='left', padx=5)
+    
+    ttk.Button(buttons_frame, text=app._t('clear_queue_button'), command=app.clear_rewrite_queue, bootstyle="danger").pack(side='left', padx=5)
+    
+    # Створюємо контейнер для прогрес-бару та відсотків на вкладці рерайту
+    rewrite_progress_container = ttk.Frame(app.rewrite_scrollable_frame)
+    rewrite_progress_container.pack(fill='x', padx=10, pady=5)
+
+    app.rewrite_progress_label_var = tk.StringVar(value="0%")
+    ttk.Label(rewrite_progress_container, textvariable=app.rewrite_progress_label_var, font=("Helvetica", 10, "bold"), width=5).pack(side='left')
+
+    app.rewrite_progress_var = tk.DoubleVar()
+    app.rewrite_progress_bar = ttk.Progressbar(rewrite_progress_container, variable=app.rewrite_progress_var, maximum=100, bootstyle="success-striped")
+    app.rewrite_progress_bar.pack(fill='x', expand=True, side='left', padx=(5, 0))
+    
     # Створюємо фрейм для кнопок
     rewrite_buttons_frame = ttk.Frame(app.rewrite_scrollable_frame)
     rewrite_buttons_frame.pack(pady=5)
@@ -163,10 +186,7 @@ def create_rewrite_tab(notebook, app):
     queue_main_frame = ttk.Labelframe(app.rewrite_scrollable_frame, text=app._t('task_queue_tab'))
     queue_main_frame.pack(fill='x', expand=True, padx=10, pady=10)
 
-    queue_control_frame = ttk.Frame(queue_main_frame)
-    queue_control_frame.pack(fill='x', padx=10, pady=5)
-    ttk.Button(queue_control_frame, text=app._t('process_queue_button'), command=app.process_rewrite_queue, bootstyle="success").pack(side='left', padx=5)
-    ttk.Button(queue_control_frame, text=app._t('clear_queue_button'), command=app.clear_rewrite_queue, bootstyle="danger").pack(side='left', padx=5)
+
     
     queue_list_frame = ttk.Frame(queue_main_frame)
     queue_list_frame.pack(fill='both', expand=True, padx=10, pady=5)

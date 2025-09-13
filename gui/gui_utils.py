@@ -36,7 +36,7 @@ def create_context_menu(app, event):
 
 
 def create_scrollable_tab(app, parent_tab):
-    """Create a scrollable tab with dynamic theming."""
+    """Create a scrollable tab with dynamic theming and smart scrolling."""
     theme_name = app.root.style.theme_use()
     if theme_name == 'cyborg': 
         canvas_bg = "#060606"
@@ -53,22 +53,54 @@ def create_scrollable_tab(app, parent_tab):
     frame_id = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
 
     def configure_canvas(event):
-        # ВИПРАВЛЕНО: Прибираємо умову і завжди розтягуємо внутрішній фрейм
-        # на всю ширину канвасу. Це робить поведінку стабільною.
+        # Розтягуємо внутрішній фрейм на всю ширину канвасу
         canvas.itemconfig(frame_id, width=event.width)
-        canvas.configure(scrollregion=canvas.bbox("all"))
+        update_scroll_region()
 
     def configure_scrollable_frame(event):
         # Оновлюємо скролрегіон, коли змінюється розмір контенту
+        update_scroll_region()
+        
+    def update_scroll_region():
+        # Оновлюємо регіон прокрутки
+        canvas.update_idletasks()
         canvas.configure(scrollregion=canvas.bbox("all"))
+        
+        # Перевіряємо чи потрібен скролбар
+        canvas_height = canvas.winfo_height()
+        content_height = scrollable_frame.winfo_reqheight()
+        
+        if content_height > canvas_height and canvas_height > 1:
+            # Контент не поміщається - показуємо скролбар
+            if not scrollbar.winfo_ismapped():
+                scrollbar.pack(side="right", fill="y")
+        else:
+            # Контент поміщається - ховаємо скролбар і скидаємо прокрутку
+            if scrollbar.winfo_ismapped():
+                scrollbar.pack_forget()
+            # Скидаємо позицію прокрутки вгору
+            canvas.yview_moveto(0)
 
     canvas.bind('<Configure>', configure_canvas)
     scrollable_frame.bind('<Configure>', configure_scrollable_frame)
     
     canvas.configure(yscrollcommand=scrollbar.set)
     canvas.pack(side="left", fill="both", expand=True)
-    scrollbar.pack(side="right", fill="y")
+    
+    # Початково не показуємо скролбар
+    # scrollbar.pack(side="right", fill="y")  # Видаляємо це
+    
     app.scrollable_canvases.append(canvas)
+    
+    # Додаємо функцію для примусового оновлення
+    def force_update_scroll():
+        canvas.after(100, update_scroll_region)
+    
+    # Зберігаємо функцію в app для можливості викликати її ззовні
+    if not hasattr(app, 'update_scroll_functions'):
+        app.update_scroll_functions = []
+    app.update_scroll_functions.append(force_update_scroll)
+    
     return canvas, scrollable_frame
 
 
