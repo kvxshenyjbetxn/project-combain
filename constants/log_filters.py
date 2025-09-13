@@ -71,7 +71,25 @@ FIREBASE_FILTER_PREFIXES = [
     "Firebase -> Очищення файлів зображень зі Storage для користувача",
     "Firebase -> Успішно відновлено сесію для User ID:",
     "Firebase -> Очищення логів для користувача",
-    "Firebase -> API успішно ініціалізовано для користувача:"# Детальний прогрес монтажу відео (FPS, бітрейт, тощо)
+    "Firebase -> API успішно ініціалізовано для користувача:",
+    "Hybrid mode -> Phase 1: Parallel text processing for 1 tasks.",
+    "Детальний підрахунок прогресу: знайдено 14 індивідуальних етапів.",
+    "OpenRouter -> УСПІХ: Отримано відповідь від моделі 'google/gemini-2.5-flash'.",
+    "[Image Control] Image Master Thread: Starting sequential image generation.",
+    "Гібридний режим -> Етап 2: Одночасна генерація медіа.",
+    "Starting generation of 20 images for RO using Pollinations.",
+    "Всього відправлено на озвучку: 3 фрагментів.",
+    "Pollinations -> Генерація зображення",
+    "Pollinations -> Відправка запиту на генерацію зображення. Промпт:",
+    "AudioWorkerPool запущено з 3 аудіо-воркерами та 1 воркером транскрипції.",
+    "[Audio/Subs Master] Запуск керованого пайплайну.",
+    "Pollinations -> УСПІХ: Зображення збережено в",
+    "Гібридний режим -> Етап 1: Обробку тексту завершено.",
+    "TranscriptionWorker: Початок",
+    "Whisper -> УСПІХ: Модель 'base' успішно завантажена.",
+    "Очікується 3 результатів транскрипції.",
+    "[Image Control] Image Master Thread: All image generation tasks complete."
+    
 ]
 
 def is_technical_message(message):

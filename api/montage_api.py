@@ -282,7 +282,8 @@ class MontageAPI:
             ffmpeg_executable = "ffmpeg"
             args = ffmpeg.output(final_video_with_subs, audio_input, output_video_path, **output_params).overwrite_output().get_args()
             
-            process = subprocess.Popen([ffmpeg_executable, '-y'] + args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, encoding='utf-8', errors='ignore')
+            # Додаємо прапорець -nostdin, щоб запобігти зависанню ffmpeg в очікуванні вводу
+            process = subprocess.Popen([ffmpeg_executable, '-y', '-nostdin'] + args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, encoding='utf-8', errors='ignore')
             
             total_output_frames = int(audio_duration * output_framerate)
             

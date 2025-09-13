@@ -169,7 +169,7 @@ class FirebaseAPI:
             return None
         return self.user.get('idToken') or self.user.get('id_token') or self.user.get('token')
 
-    def send_log(self, message):
+    def send_log(self, message, is_retry=False):
         if not self.is_initialized or not self.user: return
         try:
             timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
@@ -180,7 +180,17 @@ class FirebaseAPI:
             self.db.child(self.logs_ref).push({'timestamp': timestamp, 'message': message}, token)
             # Видалено технічне повідомлення, яке створювало цикл логування
         except Exception as e:
-            logger.error(f"Firebase -> Помилка надсилання логу: {e}")
+            error_str = str(e)
+            # Перевіряємо помилку 401 та уникаємо нескінченних рекурсій
+            if "401" in error_str and "Unauthorized" in error_str and not is_retry:
+                logger.warning("Firebase -> Токен застарів. Спроба оновлення...")
+                if self.refresh_user_token():
+                    logger.info("Firebase -> Токен успішно оновлено. Повторна відправка логу...")
+                    self.send_log(message, is_retry=True) # Повторна спроба
+                else:
+                    logger.error(f"Firebase -> Не вдалося оновити токен. Помилка надсилання логу: {e}")
+            else:
+                logger.error(f"Firebase -> Помилка надсилання логу: {e}")
 
     def send_log_in_thread(self, message):
         if not self.is_initialized: return
