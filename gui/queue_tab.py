@@ -32,7 +32,7 @@ def create_queue_tab(notebook, app):
 
     # Frame for image generation control buttons
     image_control_frame = ttk.Frame(app.queue_scrollable_frame)
-    image_control_frame.pack(pady=5)
+    image_control_frame.pack(fill='x', padx=10, pady=5)
 
     skip_image_button = ttk.Button(
         image_control_frame,

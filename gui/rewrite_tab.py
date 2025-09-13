@@ -113,14 +113,11 @@ def create_rewrite_tab(notebook, app):
     buttons_frame = ttk.Frame(app.rewrite_scrollable_frame)
     buttons_frame.pack(fill='x', padx=10, pady=5)
     ttk.Button(buttons_frame, text=app._t('add_to_queue_button'), command=app.add_to_rewrite_queue, bootstyle="info").pack(side='left', padx=5)
-    
-    # --- Frame for image generation API selector ---
-    rewrite_buttons_frame = ttk.Frame(app.rewrite_scrollable_frame)
-    rewrite_buttons_frame.pack(pady=5)
 
-    ttk.Label(rewrite_buttons_frame, text=f"{app._t('image_api_label')}:").pack(side='left', padx=(10, 2))
+    # --- Image Generation API Selector ---
+    ttk.Label(buttons_frame, text=f"{app._t('image_api_label')}:").pack(side='left', padx=(20, 2))
     image_api_combo_rewrite = ttk.Combobox(
-        rewrite_buttons_frame, 
+        buttons_frame, 
         textvariable=app.active_image_api_var, 
         values=["pollinations", "recraft"], 
         state="readonly",
