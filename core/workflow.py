@@ -480,10 +480,9 @@ class WorkflowManager:
             self.app.stop_telegram_polling.set()
             self.app._update_button_states(is_processing=False, is_image_stuck=False)
             
-            # Очищуємо єдину чергу після завершення обробки
+            # Завершуємо обробку, АЛЕ НЕ очищуємо чергу
             self.app.is_processing_queue = False
-            self.app.task_queue.clear()
-            self.app.root.after(0, self.app.update_queue_display) # Оновлюємо єдиний дисплей
+            self.app.root.after(0, self.app.update_queue_display) 
             
             if hasattr(self.app, 'pause_resume_button'):
                  self.app.root.after(0, lambda: self.app.pause_resume_button.config(text=self.app._t('pause_button'), state="disabled"))
@@ -595,18 +594,21 @@ class WorkflowManager:
             
             # Rewrite logic
             step_name_key_rewrite = self.app._t('step_name_rewrite_text')
-            if status_key in app.task_completion_status and step_name_key_rewrite in app.task_completion_status[status_key]['steps']:
-                app.task_completion_status[status_key]['steps'][step_name_key_rewrite] = "В процесі"
-                app.root.after(0, app.update_rewrite_task_status_display)
+            if task['steps'][lang_code]['rewrite']:
+                if status_key in app.task_completion_status and step_name_key_rewrite in app.task_completion_status[status_key]['steps']:
+                    app.task_completion_status[status_key]['steps'][step_name_key_rewrite] = "В процесі"
+                    app.root.after(0, app.update_rewrite_task_status_display)
 
-            rewritten_text = self.or_api.rewrite_text(transcribed_text, self.config["openrouter"]["rewrite_model"], self.config["openrouter"]["rewrite_params"], rewrite_prompt_template)
-            if not rewritten_text: 
-                if status_key in app.task_completion_status: app.task_completion_status[status_key]['steps'][step_name_key_rewrite] = "Помилка"
-                return None
-            
-            with open(os.path.join(lang_output_path, "rewritten_text.txt"), "w", encoding='utf-8') as f: f.write(rewritten_text)
-            app.increment_and_update_progress(queue_type)
-            if status_key in app.task_completion_status: app.task_completion_status[status_key]['steps'][step_name_key_rewrite] = "Готово"
+                rewritten_text = self.or_api.rewrite_text(transcribed_text, self.config["openrouter"]["rewrite_model"], self.config["openrouter"]["rewrite_params"], rewrite_prompt_template)
+                if not rewritten_text: 
+                    if status_key in app.task_completion_status: app.task_completion_status[status_key]['steps'][step_name_key_rewrite] = "Помилка"
+                    return None
+                
+                with open(os.path.join(lang_output_path, "rewritten_text.txt"), "w", encoding='utf-8') as f: f.write(rewritten_text)
+                app.increment_and_update_progress(queue_type)
+                if status_key in app.task_completion_status: app.task_completion_status[status_key]['steps'][step_name_key_rewrite] = "Готово"
+            else:
+                rewritten_text = transcribed_text # Якщо рерайт вимкнено, працюємо з оригінальним текстом
             
             # CTA logic
             cta_path = os.path.join(lang_output_path, "call_to_action.txt")
@@ -667,11 +669,12 @@ class WorkflowManager:
             if data.get('text_results') and data['task']['steps'][lang_code].get('gen_images'):
                 success = self._image_generation_worker(data, task_key, task_idx_str + 1, len(queue_to_process), queue_type, is_rewrite)
                 if status_key in self.app.task_completion_status:
+                    # Якщо генерація пройшла успішно (хоча б одна картинка), зараховуємо крок
                     if self.app.task_completion_status[status_key]["images_generated"] > 0:
-                        self.app.task_completion_status[status_key]['steps'][step_name] = "Готово"
-                        self.app.increment_and_update_progress(queue_type) # +1 за пачку картинок
-                    else:
-                        self.app.task_completion_status[status_key]['steps'][step_name] = "Помилка"
+                        self.app.increment_and_update_progress(queue_type)
+                    # Якщо жодної картинки не згенеровано, але вони мали бути, ставимо помилку
+                    elif self.app.task_completion_status[status_key]["total_images"] > 0:
+                         self.app.task_completion_status[status_key]['steps'][step_name] = "Помилка"
             elif status_key in self.app.task_completion_status and step_name in self.app.task_completion_status[status_key]['steps']:
                 self.app.task_completion_status[status_key]['steps'][step_name] = "Пропущено"
 

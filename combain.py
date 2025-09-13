@@ -718,6 +718,12 @@ class TranslationApp:
             messagebox.showwarning(self._t('warning_title'), self._t('warning_no_lang'))
             return False
 
+        # Очищуємо чергу, ТІЛЬКИ якщо вона наразі не обробляється
+        if not self.is_processing_queue:
+            self.task_queue.clear()
+            self.task_completion_status.clear()
+            logger.info("Створено нову сесію завдань, стара черга очищена.")
+
         task_steps = {}
         for lang_code in selected_langs:
             task_steps[lang_code] = {key: var.get() for key, var in self.lang_step_vars[lang_code].items()}
@@ -2424,6 +2430,12 @@ class TranslationApp:
             messagebox.showwarning(self._t('warning_title'), self._t('warning_invalid_rewrite_dir'))
             return
 
+        # Очищуємо чергу, ТІЛЬКИ якщо вона наразі не обробляється
+        if not self.is_processing_queue:
+            self.task_queue.clear()
+            self.task_completion_status.clear()
+            logger.info("Створено нову сесію завдань, стара черга очищена.")
+
         tasks_added = 0
         
         # --- Обробка посилань з текстового поля ---
@@ -2704,13 +2716,15 @@ class TranslationApp:
             if total > 0:
                 return f"{done}/{total}"
 
+        if step_key == 'gen_images':
+            total = status_info.get('total_images', 0)
+            done = status_info.get('images_generated', 0)
+            if total > 0:
+                return f"{done}/{total}"
+
         # Динамічне відображення для кроків у статусі "В процесі"
         if status == "В процесі":
-            if step_key == 'gen_images':
-                total = status_info.get('total_images', 0)
-                done = status_info.get('images_generated', 0)
-                return f"{done}/{total}" if total > 0 else status
-            elif step_key == 'create_video':
+            if step_key == 'create_video':
                 with self.video_progress_lock:
                     task_key_tuple = (task_index, lang_code)
                     progress_dict = self.video_chunk_progress.get(task_key_tuple, {})
