@@ -2,7 +2,7 @@
 
 import re
 import logging
-import math # <-- ДОДАНО ВІДСУТНІЙ ІМПОРТ
+import math
 
 logger = logging.getLogger("TranslationApp")
 

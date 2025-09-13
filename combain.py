@@ -829,10 +829,17 @@ class TranslationApp:
                 # Показуємо детальний прогрес кожного кроку
                 for step_key, enabled in task['steps'][lang_code].items():
                     if enabled:
-                        step_name = self._t(f'step_{step_key}')
                         
-                        # Отримуємо статус кроку з task_completion_status
-                        status_text = self._get_step_status(i, lang_code, step_key)
+                        # Визначаємо правильну назву кроку для відображення
+                        # Для рерайту ключ у файлі перекладу має префікс "step_name_"
+                        step_name_translation_key = f'step_name_{step_key}' if task_type == 'Rewrite' else f'step_{step_key}'
+                        step_name = self._t(step_name_translation_key)
+                        
+                        # Отримуємо статус кроку, викликаючи правильну функцію залежно від типу завдання
+                        if task_type == 'Rewrite':
+                            status_text = self._get_rewrite_step_status(i, lang_code, step_key)
+                        else: # Translate
+                            status_text = self._get_step_status(i, lang_code, step_key)
                         
                         # Формуємо текст з вирівнюванням
                         if status_text:
@@ -997,65 +1004,25 @@ class TranslationApp:
         return ""
     
     def update_task_status_display(self, task_index=None, lang_code=None, step_key=None, status=None):
-        """Оновлює статус конкретного кроку в черзі завдань"""
+        """Оновлює статус конкретного кроку в єдиній черзі завдань."""
         if not hasattr(self, 'queue_tree'):
             return
-        
-        # Якщо не вказано конкретне завдання, оновлюємо весь дисплей
-        if task_index is None:
-            self.update_queue_display()
-            return
-        
-        # Знаходимо відповідний елемент в дереві та оновлюємо його
+
+        # Незалежно від параметрів, ми просто викликаємо повне оновлення
+        # відображення черги, оскільки це найнадійніший спосіб.
         try:
             # Оновлюємо відображення після короткої затримки, щоб уникнути зависання UI
             self.root.after(100, self.update_queue_display)
-            # Також оновлюємо висоту черги, якщо статус змінився
-            self.root.after(200, self._adjust_queue_height)
-        except:
-            pass  # Ігноруємо помилки, якщо GUI недоступний
+        except Exception as e:
+            # Ігноруємо помилки, якщо GUI недоступний під час закриття
+            if "invalid command name" not in str(e):
+                 logger.warning(f"Помилка під час планування оновлення GUI: {e}")
 
-        # Підраховуємо загальну кількість елементів у дереві рерайт (включаючи дочірні)
-        def count_tree_items(parent=""):
-            count = len(self.rewrite_queue_tree.get_children(parent))
-            for child in self.rewrite_queue_tree.get_children(parent):
-                count += count_tree_items(child)
-            return count
-        
-        total_items = count_tree_items()
-        
-        # Якщо черга порожня, все одно показуємо мінімальну кількість рядків
-        if total_items == 0:
-            total_items = 3  # Показуємо 3 порожні рядки
-        
-        # Встановлюємо параметри висоти
-        min_height = 5   # Мінімальна висота
-        
-        # Розраховуємо максимальну висоту на основі розміру вікна
-        try:
-            window_height = self.root.winfo_height()
-            # Максимум 40% від висоти вікна, але не менше 15 рядків і не більше 30
-            max_height_based_on_window = max(15, min(int(window_height * 0.4 / 20), 30))  # ~20px на рядок
-            max_height = max_height_based_on_window
-        except:
-            max_height = 25  # Значення за замовчуванням якщо не вдається отримати розмір вікна
-        
-        optimal_height = max(min_height, min(total_items + 2, max_height))  # +2 для буферу
-        
-        # Застосовуємо нову висоту
-        current_height = self.rewrite_queue_tree.cget('height')
-        if current_height != optimal_height:
-            self.rewrite_queue_tree.configure(height=optimal_height)
-            
-            # Зберігаємо нову висоту в конфігурації
-            if 'ui_settings' not in self.config:
-                self.config['ui_settings'] = {}
-            self.config['ui_settings']['rewrite_queue_height'] = optimal_height
-            
-            # Оновлюємо скрол-регіон батьківського контейнера
-            if hasattr(self, 'update_scroll_functions'):
-                for update_func in self.update_scroll_functions:
-                    update_func()
+
+    def update_rewrite_task_status_display(self, task_index=None, lang_code=None, step_key=None, status=None):
+        """Оновлює статус конкретного кроку рерайт-завдання в черзі (псевдонім для update_task_status_display)."""
+        # Ця функція тепер просто викликає основну, оскільки інтерфейс черги єдиний.
+        self.update_task_status_display(task_index, lang_code, step_key, status)
 
     def process_queue(self):
         if self.is_processing_queue:
@@ -1464,10 +1431,9 @@ class TranslationApp:
         # Оновлюємо тільки прогрес-бар без тексту
         progress_percent = min(100, (self.current_queue_step / self.total_queue_steps) * 100) if self.total_queue_steps > 0 else 0
         
-        # Вибираємо правильний прогрес-бар залежно від типу черги
-        if queue_type == 'rewrite':
-            self.root.after(0, lambda: self.rewrite_progress_var.set(progress_percent))
-        else:  # 'main'
+        # Оскільки тепер прогрес-бар єдиний, ми завжди оновлюємо self.progress_var
+        # і ігноруємо 'queue_type' для цього віджета.
+        if hasattr(self, 'progress_var'):
             self.root.after(0, lambda: self.progress_var.set(progress_percent))
     
     def update_progress_for_montage(self, message, task_key=None, chunk_index=None, progress=None):

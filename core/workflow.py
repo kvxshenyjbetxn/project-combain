@@ -257,24 +257,25 @@ class WorkflowManager:
             # Phase 1: Parallel text processing
             logger.info(f"Hybrid mode -> Phase 1: Parallel text processing for {len(queue_to_process)} tasks.")
             
-            # Визначаємо, які текстові кроки будуть виконуватись
-            text_step_keys = ['rewrite_text'] if is_rewrite else ['translate']
-            
-            # Встановлюємо статус "В процесі" для основного текстового кроку
-            main_text_step_key = 'step_name_rewrite_text' if is_rewrite else 'step_name_translate'
-            step_name_key = self.app._t(main_text_step_key)
+            # Встановлюємо статус "В процесі" для всіх текстових кроків, які будуть виконуватись
+            text_steps_to_set_in_progress = ['rewrite', 'cta', 'gen_prompts'] if is_rewrite else ['translate', 'cta', 'gen_prompts']
             
             for task_index, task in enumerate(queue_to_process):
                 for lang_code in task['selected_langs']:
                     status_key = self._get_status_key(task_index, lang_code, is_rewrite)
-                    # Перевіряємо, чи крок увімкнено для цього завдання
-                    step_enabled_key = 'rewrite' if is_rewrite else 'translate'
-                    if task['steps'][lang_code].get(step_enabled_key):
-                        if status_key in self.app.task_completion_status and step_name_key in self.app.task_completion_status[status_key]['steps']:
-                            self.app.task_completion_status[status_key]['steps'][step_name_key] = "В процесі"
+                    if status_key in self.app.task_completion_status:
+                        for step_key in text_steps_to_set_in_progress:
+                            # Встановлюємо статус, тільки якщо цей крок увімкнено в налаштуваннях завдання
+                            if task['steps'][lang_code].get(step_key):
+                                step_name_key = self.app._t(f'step_name_{step_key}') # Для рерайту ключ інший
+                                if step_name_key in self.app.task_completion_status[status_key]['steps']:
+                                    self.app.task_completion_status[status_key]['steps'][step_name_key] = "В процесі"
             
-            if is_rewrite: self.app.root.after(0, self.app.update_rewrite_task_status_display)
-            else: self.app.root.after(0, self.app.update_task_status_display)
+            # Оновлюємо GUI, щоб показати "В процесі"
+            if is_rewrite: 
+                self.app.root.after(0, self.app.update_rewrite_task_status_display)
+            else: 
+                self.app.root.after(0, self.app.update_task_status_display)
             
             with concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
                 text_futures = {}
