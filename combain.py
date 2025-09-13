@@ -404,7 +404,7 @@ class TranslationApp:
         if image_id in self.image_id_to_path_map:
             path = self.image_id_to_path_map[image_id]
             logger.info(f"Виконання команди 'delete' для {image_id} (шлях: {path})")
-            self._delete_image(path) # Ця функція вже оновлена для роботи з Firebase
+            self._delete_image(path)
         else:
             logger.warning(f"Не вдалося знайти локальний шлях для зображення ID {image_id}")
     

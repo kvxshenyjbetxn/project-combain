@@ -1039,7 +1039,11 @@ class WorkflowManager:
                 logger.info("[Audio/Subs Master] Пайплайн завершено, воркер пул зупинено.")
                 
     def _video_download_worker(self, task):
-        """Завантажує відео, конвертує в mp3 та повертає шлях до файлу."""
+        """
+        Завантажує відео з будь-якого URL, використовуючи yt-dlp, і конвертує його в MP3.
+        Ця версія є більш надійною і намагається знайти найкращий доступний аудіопотік
+        для максимальної ефективності.
+        """
         try:
             import yt_dlp
 
@@ -1048,27 +1052,29 @@ class WorkflowManager:
             temp_download_dir = os.path.join(rewrite_base_dir, "temp_downloads")
             os.makedirs(temp_download_dir, exist_ok=True)
             
-            # Більш надійна конфігурація, що базується на прикладі з проекту "app"
             ydl_opts = {
-                'format': 'bestaudio/best',
+                # ОНОВЛЕНО: Спочатку шукаємо найкраще аудіо. Якщо не виходить,
+                # хапаємо найкращий mp4 відео/аудіо потік, або взагалі будь-який, який знайдемо.
+                'format': 'bestaudio/best/bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b',
+                
                 'outtmpl': os.path.join(temp_download_dir, '%(title)s.%(ext)s'),
+                
                 'postprocessors': [{
                     'key': 'FFmpegExtractAudio',
                     'preferredcodec': 'mp3',
                     'preferredquality': '192',
                 }],
+                
+                'nocheckcertificate': True,
+                'retries': 15,
+                'fragment_retries': 15,
+                'socket_timeout': 60,
+                'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36',
+                'ignoreerrors': True,
                 'quiet': True,
                 'noprogress': True,
-                'ignoreerrors': True,
-                'nocheckcertificate': True,  # Додано для уникнення проблем з сертифікатами
-                'retries': 10,               # Додано спроби повторного завантаження
-                'fragment_retries': 10,      # Додано спроби повторного завантаження фрагментів
-                'socket_timeout': 30,        # Додано таймаут сокета
             }
 
-            # Додаємо підтримку cookies з файлу конфігурації, як в "app"
-            # Щоб це працювало, додайте налаштування "use_cookies": true та "cookies_path": "шлях/до/вашого/cookies.txt"
-            # у секцію "rewrite_settings" вашого файлу конфігурації.
             if self.config.get("rewrite_settings", {}).get("use_cookies", False):
                 cookie_path = self.config.get("rewrite_settings", {}).get("cookies_path", "")
                 if cookie_path and os.path.exists(cookie_path):
@@ -1078,52 +1084,59 @@ class WorkflowManager:
                     logger.warning("Увімкнено використання cookies, але шлях до файлу не вказано або файл не знайдено.")
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                logger.info(f"Починаю завантаження та обробку URL: {url}")
                 info = ydl.extract_info(url, download=True)
+                
                 if not info:
-                    logger.error(f"Не вдалося завантажити інформацію для URL: {url}")
+                    logger.error(f"Не вдалося отримати інформацію для URL: {url}. Можливо, посилання недійсне або доступ обмежено.")
                     return None
 
-                video_title = info.get('title', 'video')
-                # Формуємо очікуваний шлях до mp3 файлу
                 original_filepath = ydl.prepare_filename(info)
                 base, _ = os.path.splitext(original_filepath)
                 final_mp3_path = base + '.mp3'
-            
-            if os.path.exists(final_mp3_path):
-                # Переміщуємо mp3 у постійну папку "video"
-                video_folder = os.path.join(self.app.APP_BASE_PATH, "video")
-                os.makedirs(video_folder, exist_ok=True)
                 
-                final_filename = f"{sanitize_filename(video_title)}.mp3"
-                destination_path = os.path.join(video_folder, final_filename)
-                
-                # Уникаємо перезапису
-                if os.path.exists(destination_path):
-                    logger.warning(f"Файл {final_filename} вже існує. Використовуємо існуючий.")
-                    # Видаляємо щойно завантажений, якщо він в тимчасовій папці
-                    if temp_download_dir in final_mp3_path:
-                        try:
-                            os.remove(final_mp3_path)
-                        except OSError as e:
-                            logger.error(f"Не вдалося видалити тимчасовий файл {final_mp3_path}: {e}")
-                    return destination_path
+                if not os.path.exists(final_mp3_path):
+                     if 'entries' in info and info.get('entries'):
+                         first_entry = info['entries'][0]
+                         if first_entry:
+                             original_filepath = ydl.prepare_filename(first_entry)
+                             base, _ = os.path.splitext(original_filepath)
+                             final_mp3_path = base + '.mp3'
 
-                shutil.move(final_mp3_path, destination_path)
-                logger.info(f"Відео '{video_title}' успішно завантажено та конвертовано в {destination_path}")
-                
-                # Додаємо до списку оброблених, щоб не обробляти повторно
-                self.app.save_processed_link(final_filename)
-                
-                return destination_path
-            else:
-                logger.error(f"Не вдалося знайти конвертований mp3 файл для {url}. Можливо, сталася помилка під час завантаження або конвертації.")
-                return None
+                if os.path.exists(final_mp3_path):
+                    video_title = info.get('title', 'video')
+                    
+                    video_folder = os.path.join(self.app.APP_BASE_PATH, "video")
+                    os.makedirs(video_folder, exist_ok=True)
+                    
+                    final_filename = f"{sanitize_filename(video_title)}.mp3"
+                    destination_path = os.path.join(video_folder, final_filename)
+                    
+                    if os.path.exists(destination_path):
+                        logger.warning(f"Файл {final_filename} вже існує. Використовуємо існуючий.")
+                        if os.path.abspath(final_mp3_path) != os.path.abspath(destination_path):
+                            try:
+                                os.remove(final_mp3_path)
+                            except OSError as e:
+                                logger.error(f"Не вдалося видалити тимчасовий файл {final_mp3_path}: {e}")
+                        return destination_path
+
+                    shutil.move(final_mp3_path, destination_path)
+                    logger.info(f"Успішно завантажено та конвертовано: '{video_title}' -> {destination_path}")
+                    
+                    self.app.save_processed_link(final_filename)
+                    
+                    return destination_path
+                else:
+                    logger.error(f"Не вдалося знайти фінальний MP3 файл для {url}. Очікувався тут: {final_mp3_path}. Можливо, сталася помилка під час конвертації FFmpeg.")
+                    return None
+
         except yt_dlp.utils.DownloadError as e:
-            # Більш детальний вивід помилок yt-dlp
-            logger.error(f"Помилка завантаження yt-dlp для {task.get('url', '')}: {e}")
+            logger.error(f"Помилка завантаження yt-dlp для URL '{task.get('url', '')}': {e}")
+            logger.error("Перевірте, чи URL доступний, чи не потрібна VPN, та чи встановлено FFmpeg у системі.")
             return None
         except Exception as e:
-            logger.exception(f"Критична помилка під час завантаження відео з {task.get('url', '')}: {e}")
+            logger.exception(f"Критична непередбачувана помилка під час завантаження відео з '{task.get('url', '')}': {e}")
             return None
 
     def _concatenate_videos(self, app_instance, video_chunks, output_path):
