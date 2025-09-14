@@ -530,7 +530,6 @@ class WorkflowManager:
             text_to_process = task['input_text']
             translation_path = os.path.join(output_path, "translation.txt")
 
-            # Translation logic
             step_name_key_translate = self.app._t('step_name_translate')
             if lang_steps.get('translate'):
                 if status_key in app.task_completion_status and step_name_key_translate in app.task_completion_status[status_key]['steps']:
@@ -538,14 +537,19 @@ class WorkflowManager:
                     app.root.after(0, app.update_task_status_display)
 
                 translated_text = self.or_api.translate_text(task['input_text'], self.config["openrouter"]["translation_model"], self.config["openrouter"]["translation_params"], lang_name, custom_prompt_template=lang_config.get("prompt"))
+                
                 if translated_text:
                     text_to_process = translated_text
                     with open(translation_path, 'w', encoding='utf-8') as f: f.write(translated_text)
                     app.increment_and_update_progress(queue_type)
-                    if status_key in app.task_completion_status: app.task_completion_status[status_key]['steps'][step_name_key_translate] = "Готово"
+                    if status_key in app.task_completion_status: 
+                        app.task_completion_status[status_key]['steps'][step_name_key_translate] = "Готово"
+                    app.root.after(0, app.update_task_status_display)
                 else:
                     logger.error(f"Translation failed for {lang_name}.")
-                    if status_key in app.task_completion_status: app.task_completion_status[status_key]['steps'][step_name_key_translate] = "Помилка"
+                    if status_key in app.task_completion_status: 
+                        app.task_completion_status[status_key]['steps'][step_name_key_translate] = "Помилка"
+                    app.root.after(0, app.update_task_status_display)
                     return None
             elif os.path.exists(translation_path):
                  with open(translation_path, 'r', encoding='utf-8') as f: text_to_process = f.read()
@@ -606,52 +610,56 @@ class WorkflowManager:
             selected_template_name = app.rewrite_template_var.get()
             rewrite_prompt_template = self.config.get("rewrite_prompt_templates", {}).get(selected_template_name, {}).get(lang_code)
             
-            # Rewrite logic
             step_name_key_rewrite = self.app._t('step_name_rewrite_text')
             if task['steps'][lang_code]['rewrite']:
                 if status_key in app.task_completion_status and step_name_key_rewrite in app.task_completion_status[status_key]['steps']:
                     app.task_completion_status[status_key]['steps'][step_name_key_rewrite] = "В процесі"
-                    app.root.after(0, app.update_rewrite_task_status_display)
+                    app.root.after(0, app.update_task_status_display)
 
                 rewritten_text = self.or_api.rewrite_text(transcribed_text, self.config["openrouter"]["rewrite_model"], self.config["openrouter"]["rewrite_params"], rewrite_prompt_template)
+                
                 if not rewritten_text: 
-                    if status_key in app.task_completion_status: app.task_completion_status[status_key]['steps'][step_name_key_rewrite] = "Помилка"
+                    if status_key in app.task_completion_status: 
+                        app.task_completion_status[status_key]['steps'][step_name_key_rewrite] = "Помилка"
+                    app.root.after(0, app.update_task_status_display)
                     return None
                 
                 with open(os.path.join(lang_output_path, "rewritten_text.txt"), "w", encoding='utf-8') as f: f.write(rewritten_text)
                 app.increment_and_update_progress(queue_type)
-                if status_key in app.task_completion_status: app.task_completion_status[status_key]['steps'][step_name_key_rewrite] = "Готово"
+                if status_key in app.task_completion_status: 
+                    app.task_completion_status[status_key]['steps'][step_name_key_rewrite] = "Готово"
+                app.root.after(0, app.update_task_status_display)
             else:
-                rewritten_text = transcribed_text # Якщо рерайт вимкнено, працюємо з оригінальним текстом
+                rewritten_text = transcribed_text
             
-            # CTA logic
             cta_path = os.path.join(lang_output_path, "call_to_action.txt")
             if task['steps'][lang_code]['cta']:
                 step_name_key_cta = self.app._t('step_name_cta')
                 if status_key in app.task_completion_status:
                     app.task_completion_status[status_key]['steps'][step_name_key_cta] = "В процесі"
-                    app.root.after(0, app.update_rewrite_task_status_display)
+                    app.root.after(0, app.update_task_status_display)
                 
                 cta_text = self.or_api.generate_call_to_action(rewritten_text, self.config["openrouter"]["cta_model"], self.config["openrouter"]["cta_params"])
                 if cta_text:
                     with open(cta_path, 'w', encoding='utf-8') as f: f.write(cta_text)
                     app.increment_and_update_progress(queue_type)
-                    if status_key in app.task_completion_status: app.task_completion_status[status_key]['steps'][step_name_key_cta] = "Готово"
+                    if status_key in app.task_completion_status: 
+                        app.task_completion_status[status_key]['steps'][step_name_key_cta] = "Готово"
 
-            # Prompt gen logic
             raw_prompts = None
             prompts_path = os.path.join(lang_output_path, "image_prompts.txt")
             if task['steps'][lang_code]['gen_prompts']:
                 step_name_key_prompts = self.app._t('step_name_gen_prompts')
                 if status_key in app.task_completion_status:
                     app.task_completion_status[status_key]['steps'][step_name_key_prompts] = "В процесі"
-                    app.root.after(0, app.update_rewrite_task_status_display)
+                    app.root.after(0, app.update_task_status_display)
 
                 raw_prompts = self.or_api.generate_image_prompts(rewritten_text, self.config["openrouter"]["prompt_model"], self.config["openrouter"]["prompt_params"])
                 if raw_prompts:
                     with open(prompts_path, 'w', encoding='utf-8') as f: f.write(raw_prompts)
                     app.increment_and_update_progress(queue_type)
-                    if status_key in app.task_completion_status: app.task_completion_status[status_key]['steps'][step_name_key_prompts] = "Готово"
+                    if status_key in app.task_completion_status: 
+                        app.task_completion_status[status_key]['steps'][step_name_key_prompts] = "Готово"
             elif os.path.exists(prompts_path):
                 with open(prompts_path, 'r', encoding='utf-8') as f: raw_prompts = f.read()
 
@@ -879,11 +887,11 @@ class WorkflowManager:
         total_audio_chunks_expected = 0
 
         try:
-            # 1. Створення плану та відправка всіх аудіо-завдань на виконання
             for task_key, data in sorted(processing_data.items()):
                 if not data.get('text_results'): continue
 
                 task_idx_str, lang_code = task_key
+                status_key = self._get_status_key(task_idx_str, lang_code, is_rewrite)
                 lang_config = self.config["languages"][lang_code]
                 tts_service = lang_config.get("tts_service", "elevenlabs")
                 text_to_process = data['text_results']['text_to_process']
@@ -910,11 +918,8 @@ class WorkflowManager:
                     'data': data
                 }
                 
-                # Ініціалізація лічильників
-                status_key = self._get_status_key(task_idx_str, lang_code, is_rewrite)
                 if status_key in self.app.task_completion_status:
                     self.app.task_completion_status[status_key]['total_audio'] = len(text_chunks)
-                    # Кількість субтитрів залежить від того, чи буде об'єднання
                     subs_count = num_parallel_chunks if tts_service == 'voicemaker' and len(text_chunks) > num_parallel_chunks else len(text_chunks)
                     self.app.task_completion_status[status_key]['total_subs'] = subs_count
                     self.app.task_completion_status[status_key]['audio_generated'] = 0
@@ -932,7 +937,6 @@ class WorkflowManager:
 
             logger.info(f"Всього відправлено на озвучку: {total_audio_chunks_expected} фрагментів.")
 
-            # 2. Цикл збору результатів озвучки та відправки на транскрипцію
             completed_audio_count = 0
             total_transcriptions_submitted = 0
 
@@ -951,13 +955,11 @@ class WorkflowManager:
                     task_info = tasks_info[task_key]
                     task_info['completed_audio_items'].append(result.item)
                     
-                    # Оновлюємо лічильник аудіо в GUI
                     task_key_tuple = eval(task_key)
                     status_key = self._get_status_key(task_key_tuple[0], task_key_tuple[1], is_rewrite)
                     if status_key in self.app.task_completion_status:
                         self.app.task_completion_status[status_key]['audio_generated'] += 1
-                        if is_rewrite: self.app.root.after(0, self.app.update_rewrite_task_status_display)
-                        else: self.app.root.after(0, self.app.update_task_status_display)
+                        self.app.root.after(0, self.app.update_task_status_display)
 
                     if task_info['tts_service'] != 'voicemaker':
                         trans_item = TranscriptionPipelineItem(result.item.output_path, os.path.dirname(result.item.output_path), result.item.chunk_index, result.item.lang_code, task_key)
@@ -982,7 +984,6 @@ class WorkflowManager:
                 except queue.Empty:
                     continue
 
-            # 3. Збираємо результати транскрипції
             logger.info(f"Очікується {total_transcriptions_submitted} результатів транскрипції.")
             completed_transcriptions = 0
             while completed_transcriptions < total_transcriptions_submitted and not self.app.shutdown_event.is_set():
@@ -998,18 +999,15 @@ class WorkflowManager:
                         info['data']['subs_chunks'].append(result_item.subs_path)
                         info['data']['audio_chunks'].append(result_item.audio_path)
                         
-                        # Оновлюємо лічильник субтитрів в GUI
                         task_key_tuple = eval(result_item.task_key)
                         status_key = self._get_status_key(task_key_tuple[0], task_key_tuple[1], is_rewrite)
                         if status_key in self.app.task_completion_status:
                             self.app.task_completion_status[status_key]['subs_generated'] += 1
-                            if is_rewrite: self.app.root.after(0, self.app.update_rewrite_task_status_display)
-                            else: self.app.root.after(0, self.app.update_task_status_display)
+                            self.app.root.after(0, self.app.update_task_status_display)
 
                 except queue.Empty:
                     continue
 
-            # Фінальне оновлення статусів (тільки для помилок)
             for tk, info in tasks_info.items():
                 if 'subs_chunks' in info['data']: info['data']['subs_chunks'].sort()
                 if 'audio_chunks' in info['data']: info['data']['audio_chunks'].sort()
@@ -1017,19 +1015,18 @@ class WorkflowManager:
                 task_key_tuple = eval(tk)
                 status_key = self._get_status_key(task_key_tuple[0], task_key_tuple[1], is_rewrite)
                 if status_key in self.app.task_completion_status:
-                    total_audio = self.app.task_completion_status[status_key].get('total_audio', 0)
-                    generated_audio = self.app.task_completion_status[status_key].get('audio_generated', 0)
-                    total_subs = self.app.task_completion_status[status_key].get('total_subs', 0)
-                    generated_subs = self.app.task_completion_status[status_key].get('subs_generated', 0)
-                    
-                    if total_audio > 0 and generated_audio < total_audio:
-                        self.app.task_completion_status[status_key]['steps'][self.app._t('step_name_audio')] = "Помилка"
-                    
-                    if total_subs > 0 and generated_subs < total_subs:
-                        self.app.task_completion_status[status_key]['steps'][self.app._t('step_name_create_subtitles')] = "Помилка"
+                    status_data = self.app.task_completion_status[status_key]
+                    if status_data.get('total_audio', 0) > 0 and status_data.get('audio_generated') == status_data.get('total_audio'):
+                         status_data['steps'][self.app._t('step_name_audio')] = f"{status_data['total_audio']}/{status_data['total_audio']}"
+                    elif status_data.get('total_audio', 0) > 0:
+                         status_data['steps'][self.app._t('step_name_audio')] = "Помилка"
 
-            if is_rewrite: self.app.root.after(0, self.app.update_rewrite_task_status_display)
-            else: self.app.root.after(0, self.app.update_task_status_display)
+                    if status_data.get('total_subs', 0) > 0 and status_data.get('subs_generated') == status_data.get('total_subs'):
+                         status_data['steps'][self.app._t('step_name_create_subtitles')] = f"{status_data['total_subs']}/{status_data['total_subs']}"
+                    elif status_data.get('total_subs', 0) > 0:
+                         status_data['steps'][self.app._t('step_name_create_subtitles')] = "Помилка"
+
+            self.app.root.after(0, self.app.update_task_status_display)
 
         except Exception as e:
             logger.exception(f"CRITICAL ERROR in audio/subs master pipeline: {e}")

@@ -797,7 +797,6 @@ class TranslationApp:
             timestamp = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(task['timestamp']))
             task_name = task.get('task_name', f"{self._t('task_label')} {i+1}")
             
-            # Розрахунок загального прогресу завдання
             total_progress = self._calculate_task_progress(i)
             progress_text = f"({total_progress}%)" if total_progress > 0 else ""
             
@@ -808,9 +807,8 @@ class TranslationApp:
             
             for lang_code in task['selected_langs']:
                 use_default_dir = self.config.get("output_settings", {}).get("use_default_dir", False)
-                lang_path_display = self._t('use_default_dir_label') if use_default_dir else task['lang_output_paths'].get(lang_code, '...')
+                lang_path_display = self._t('use_default_dir_label') if use_default_dir else task.get('lang_output_paths', {}).get(lang_code, '...')
                 
-                # Розрахунок прогресу для конкретної мови
                 lang_progress = self._calculate_language_progress(i, lang_code)
                 lang_progress_text = f"({lang_progress}%)" if lang_progress > 0 else ""
                 
@@ -818,25 +816,13 @@ class TranslationApp:
                                                  text=f"{lang_code.upper()} {lang_progress_text}", 
                                                  values=("", ""), open=True)
                 
-                # Показуємо шлях
                 self.queue_tree.insert(lang_node, "end", text=f"{self._t('path_label')}: {lang_path_display}", values=("", ""))
                 
-                # Показуємо детальний прогрес кожного кроку
                 for step_key, enabled in task['steps'][lang_code].items():
                     if enabled:
+                        step_name = self._t(f'step_name_{step_key}')
+                        status_text = self._get_unified_step_status(i, lang_code, step_key, task_type)
                         
-                        # Визначаємо правильну назву кроку для відображення
-                        # Для рерайту ключ у файлі перекладу має префікс "step_name_"
-                        step_name_translation_key = f'step_name_{step_key}' if task_type == 'Rewrite' else f'step_{step_key}'
-                        step_name = self._t(step_name_translation_key)
-                        
-                        # Отримуємо статус кроку, викликаючи правильну функцію залежно від типу завдання
-                        if task_type == 'Rewrite':
-                            status_text = self._get_rewrite_step_status(i, lang_code, step_key)
-                        else: # Translate
-                            status_text = self._get_step_status(i, lang_code, step_key)
-                        
-                        # Формуємо текст з вирівнюванням
                         if status_text:
                             step_text = f"{step_name}: {status_text}"
                         else:
@@ -844,12 +830,10 @@ class TranslationApp:
                         
                         self.queue_tree.insert(lang_node, "end", text=step_text, values=("", ""))
                         
-        # Прокручуємо до останнього завдання якщо є завдання
         if self.task_queue:
             last_task_id = f"task_{len(self.task_queue) - 1}"
             if self.queue_tree.exists(last_task_id):
                 self.queue_tree.see(last_task_id)
-                # Також розгортаємо останнє завдання для кращого відображення
                 self.queue_tree.item(last_task_id, open=True)
                 for child in self.queue_tree.get_children(last_task_id):
                     self.queue_tree.item(child, open=True)
@@ -890,51 +874,6 @@ class TranslationApp:
         completed_steps = sum(1 for status in steps.values() if status == "✅")
         
         return int((completed_steps / total_steps * 100)) if total_steps > 0 else 0
-    
-    def _get_step_status(self, task_index, lang_code, step_key):
-        """Отримує статус конкретного кроку у вигляді тексту"""
-        if not hasattr(self, 'task_completion_status'):
-            return ""
-
-        status_key = f"{task_index}_{lang_code}"
-        if status_key not in self.task_completion_status:
-            return ""
-
-        status_info = self.task_completion_status[status_key]
-        step_name_key = self._t(f'step_name_{step_key}')
-        status = status_info.get('steps', {}).get(step_name_key, "")
-
-        if step_key == 'gen_images':
-            total = status_info.get('total_images', 0)
-            done = status_info.get('images_generated', 0)
-            return f"{done}/{total}" if total > 0 else status
-
-        elif step_key == 'audio':
-            total = status_info.get('total_audio', 0)
-            done = status_info.get('audio_generated', 0)
-            return f"{done}/{total}" if total > 0 else status
-
-        elif step_key == 'create_subtitles':
-            total = status_info.get('total_subs', 0)
-            done = status_info.get('subs_generated', 0)
-            return f"{done}/{total}" if total > 0 else status
-
-        elif step_key == 'create_video':
-            if status == "В процесі":
-                with self.video_progress_lock:
-                    task_key_tuple = (task_index, lang_code)
-                    progress_dict = self.video_chunk_progress.get(task_key_tuple, {})
-                    if progress_dict:
-                        avg_progress = sum(progress_dict.values()) / len(progress_dict)
-                        return f"{avg_progress:.1f}%"
-                    else:
-                        return "0.0%"
-            return status
-
-        elif step_key in ['translate', 'gen_text', 'cta', 'gen_prompts']:
-            return status
-
-        return ""
     
     def update_task_status_display(self, task_index=None, lang_code=None, step_key=None, status=None):
         """Оновлює статус конкретного кроку в єдиній черзі завдань."""
@@ -2580,68 +2519,59 @@ class TranslationApp:
         if self.is_processing_queue:
             self.update_queue_display()
 
-    def _get_rewrite_step_status(self, task_index, lang_code, step_key):
-        """Отримує статус конкретного кроку рерайт у вигляді тексту"""
+    def _get_unified_step_status(self, task_index, lang_code, step_key, task_type):
+        """Отримує статус конкретного кроку з єдиної логіки."""
         if not hasattr(self, 'task_completion_status'):
             return ""
 
-        status_key = f"rewrite_{task_index}_{lang_code}"
+        is_rewrite = task_type == 'Rewrite'
+        status_key_prefix = "rewrite_" if is_rewrite else ""
+        status_key = f"{status_key_prefix}{task_index}_{lang_code}"
+
         if status_key not in self.task_completion_status:
             return ""
 
         status_info = self.task_completion_status[status_key]
-        step_name_map = {
-            'download': 'step_name_download',
-            'transcribe': 'step_name_transcribe',
-            'rewrite': 'step_name_rewrite_text',
-            'cta': 'step_name_cta',
-            'gen_prompts': 'step_name_gen_prompts',
-            'gen_images': 'step_name_gen_images',
-            'audio': 'step_name_audio',
-            'create_subtitles': 'step_name_create_subtitles',
-            'create_video': 'step_name_create_video'
-        }
-        
-        step_name_key = self._t(step_name_map.get(step_key, ''))
-        
-        if not step_name_key or step_name_key not in status_info.get('steps', {}):
-            return ""
-
-        status = status_info['steps'][step_name_key]
+        step_name_key = self._t(f'step_name_{step_key}')
+        status = status_info.get('steps', {}).get(step_name_key, "")
 
         # Спеціальна логіка для кроків з лічильником
-        if step_key == 'audio':
-            total = status_info.get('total_audio', 0)
-            done = status_info.get('audio_generated', 0)
-            if total > 0:
-                return f"{done}/{total}"
-        
-        if step_key == 'create_subtitles':
-            total = status_info.get('total_subs', 0)
-            done = status_info.get('subs_generated', 0)
-            if total > 0:
-                return f"{done}/{total}"
-
         if step_key == 'gen_images':
             total = status_info.get('total_images', 0)
             done = status_info.get('images_generated', 0)
-            if total > 0:
-                return f"{done}/{total}"
+            return f"{done}/{total}" if total > 0 else status
 
-        # Динамічне відображення для кроків у статусі "В процесі"
-        if status == "В процесі":
-            if step_key == 'create_video':
+        elif step_key == 'audio':
+            total = status_info.get('total_audio', 0)
+            done = status_info.get('audio_generated', 0)
+            # Завжди повертаємо дріб, якщо є загальна кількість, навіть коли завершено
+            return f"{done}/{total}" if total > 0 else status
+
+        elif step_key == 'create_subtitles':
+            total = status_info.get('total_subs', 0)
+            done = status_info.get('subs_generated', 0)
+            return f"{done}/{total}" if total > 0 else status
+        
+        elif step_key == 'create_video':
+            if status == "В процесі":
                 with self.video_progress_lock:
                     task_key_tuple = (task_index, lang_code)
                     progress_dict = self.video_chunk_progress.get(task_key_tuple, {})
                     if progress_dict:
-                        avg_progress = sum(progress_dict.values()) / len(progress_dict)
-                        return f"{avg_progress:.1f}%"
+                        # Перевіряємо, чи всі значення є числами
+                        valid_progress_values = [v for v in progress_dict.values() if isinstance(v, (int, float))]
+                        if valid_progress_values:
+                           avg_progress = sum(valid_progress_values) / len(valid_progress_values)
+                           return f"{avg_progress:.1f}%"
+                        else:
+                           return "0.0%"
                     else:
                         return "0.0%"
+            return status
 
+        # Для всіх інших кроків просто повертаємо їх текстовий статус
         return status
-    
+
     def increment_and_update_progress(self, queue_type='main'):
         """Збільшує лічильник виконаних кроків та оновлює прогрес-бар."""
         self.completed_individual_steps += 1
