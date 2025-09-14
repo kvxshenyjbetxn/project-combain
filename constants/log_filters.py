@@ -88,7 +88,10 @@ FIREBASE_FILTER_PREFIXES = [
     "TranscriptionWorker: Початок",
     "Whisper -> УСПІХ: Модель 'base' успішно завантажена.",
     "Очікується 3 результатів транскрипції.",
-    "[Image Control] Image Master Thread: All image generation tasks complete."
+    "[Image Control] Image Master Thread: All image generation tasks complete.",
+    "Детальний підрахунок прогресу для",
+    "Hybrid mode -> Phase 1:"
+    
     
 ]
 

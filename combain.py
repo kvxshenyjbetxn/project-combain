@@ -2532,19 +2532,34 @@ class TranslationApp:
             return ""
 
         status_info = self.task_completion_status[status_key]
-        step_name_key = self._t(f'step_name_{step_key}')
+        step_name_key_map = {
+            'translate': self._t('step_name_translate'),
+            'cta': self._t('step_name_cta'),
+            'gen_prompts': self._t('step_name_gen_prompts'),
+            'gen_images': self._t('step_name_gen_images'),
+            'audio': self._t('step_name_audio'),
+            'create_subtitles': self._t('step_name_create_subtitles'),
+            'create_video': self._t('step_name_create_video'),
+            'download': self._t('step_name_download'),
+            'transcribe': self._t('step_name_transcribe'),
+            'rewrite': self._t('step_name_rewrite_text'),
+        }
+        step_name_key = step_name_key_map.get(step_key)
+        
+        if not step_name_key:
+            return "" # Невідомий крок
+
         status = status_info.get('steps', {}).get(step_name_key, "")
 
         # Спеціальна логіка для кроків з лічильником
         if step_key == 'gen_images':
-            total = status_info.get('total_images', 0)
-            done = status_info.get('images_generated', 0)
-            return f"{done}/{total}" if total > 0 else status
+            # Статус для gen_images тепер встановлюється напряму в воркері,
+            # тому просто повертаємо його.
+            return status
 
         elif step_key == 'audio':
             total = status_info.get('total_audio', 0)
             done = status_info.get('audio_generated', 0)
-            # Завжди повертаємо дріб, якщо є загальна кількість, навіть коли завершено
             return f"{done}/{total}" if total > 0 else status
 
         elif step_key == 'create_subtitles':
@@ -2558,15 +2573,16 @@ class TranslationApp:
                     task_key_tuple = (task_index, lang_code)
                     progress_dict = self.video_chunk_progress.get(task_key_tuple, {})
                     if progress_dict:
-                        # Перевіряємо, чи всі значення є числами
                         valid_progress_values = [v for v in progress_dict.values() if isinstance(v, (int, float))]
                         if valid_progress_values:
-                           avg_progress = sum(valid_progress_values) / len(valid_progress_values)
-                           return f"{avg_progress:.1f}%"
+                            avg_progress = sum(valid_progress_values) / len(valid_progress_values)
+                            return f"{avg_progress:.1f}%"
                         else:
-                           return "0.0%"
+                            return "0.0%"
                     else:
                         return "0.0%"
+            elif status == "Готово":
+                return "100.0%" # Залишаємо 100% після завершення
             return status
 
         # Для всіх інших кроків просто повертаємо їх текстовий статус
