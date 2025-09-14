@@ -71,7 +71,8 @@ DEFAULT_CONFIG = {
     "firebase": {
         "database_url": "https://projectcombain-default-rtdb.europe-west1.firebasedatabase.app",
         "storage_bucket": "gs://projectcombain.firebasestorage.app",
-        "auto_clear_gallery": True
+        "auto_clear_gallery": True,
+        "api_key": "AIzaSyBWHOg1tUdL5nGUFsNq4KuTjttToBE2QkQ",
     },
     "user_settings": {
         "user_id": ""
