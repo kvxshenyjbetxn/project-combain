@@ -972,7 +972,6 @@ class WorkflowManager:
                         logger.warning(f"Транскрипція для {result_item.task_key} не створена (subs_path = None)")
 
                 except queue.Empty:
-                    logger.debug(f"Очікування транскрипції... ({completed_transcriptions}/{total_transcriptions_expected})")
                     continue
 
             for tk, info in tasks_info.items():
