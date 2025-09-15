@@ -90,7 +90,9 @@ FIREBASE_FILTER_PREFIXES = [
     "Очікується 3 результатів транскрипції.",
     "[Image Control] Image Master Thread: All image generation tasks complete.",
     "Детальний підрахунок прогресу для",
-    "Hybrid mode -> Phase 1:"
+    "Hybrid mode -> Phase 1:",
+    "Hybrid mode -> Phase 0: Downloading and transcription.",
+    "Firebase -> ✅ Успішно завантажено:"
     
     
 ]

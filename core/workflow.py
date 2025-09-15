@@ -622,26 +622,27 @@ class WorkflowManager:
 
         logger.info("[Image Control] Image Master Thread: All image generation tasks complete.")
 
+    # core/workflow.py
+
     def _image_generation_worker(self, data, task_key, task_num, total_tasks, queue_type, is_rewrite=False):
         prompts = data['text_results']['prompts']
         images_folder = data['text_results']['images_folder']
         lang_name = task_key[1].upper()
 
         status_key = self._get_status_key(task_key[0], task_key[1], is_rewrite)
-        if status_key in self.app.task_completion_status:
-            step_name = self.app._t('step_name_gen_images')
-            if step_name in self.app.task_completion_status[status_key]['steps']:
-                # Встановлюємо початковий статус 0/N
-                total_images = self.app.task_completion_status[status_key].get("total_images", 0)
-                if total_images > 0:
-                    self.app.task_completion_status[status_key]['steps'][step_name] = f"0/{total_images}"
-                else:
-                    self.app.task_completion_status[status_key]['steps'][step_name] = "В процесі" # Fallback
-                
-                if is_rewrite:
-                    self.app.root.after(0, self.app.update_rewrite_task_status_display)
-                else:
-                    self.app.root.after(0, self.app.update_task_status_display)
+        step_name = self.app._t('step_name_gen_images')
+
+        if status_key in self.app.task_completion_status and step_name in self.app.task_completion_status[status_key]['steps']:
+            total_images = self.app.task_completion_status[status_key].get("total_images", 0)
+            if total_images > 0:
+                self.app.task_completion_status[status_key]['steps'][step_name] = f"0/{total_images}"
+            else:
+                self.app.task_completion_status[status_key]['steps'][step_name] = "В процесі"
+            
+            if is_rewrite:
+                self.app.root.after(0, self.app.update_rewrite_task_status_display)
+            else:
+                self.app.root.after(0, self.app.update_task_status_display)
 
         with self.app.image_api_lock:
             if self.app.active_image_api is None:
@@ -652,69 +653,95 @@ class WorkflowManager:
         auto_switch_enabled = self.config.get("ui_settings", {}).get("auto_switch_service_on_fail", False)
         retry_limit_for_switch = self.config.get("ui_settings", {}).get("auto_switch_retry_limit", 10)
         
-        consecutive_failures = 0
-        
         i = 0
         while i < len(prompts):
             if not self.app._check_app_state():
                 break
 
             prompt = prompts[i]
-            with self.app.image_api_lock:
-                current_api_for_generation = self.app.active_image_api
-
-            progress_text = f"Завд.{task_num}/{total_tasks} | {lang_name} - [{current_api_for_generation.capitalize()}] {self.app._t('step_gen_images')} {i+1}/{len(prompts)}..."
-            self.app.update_progress(progress_text, queue_type=queue_type)
-
             image_path = os.path.join(images_folder, f"image_{i+1:03d}.jpg")
-
-            if self.app.skip_image_event.is_set():
-                self.app.skip_image_event.clear()
-                logger.warning(f"Skipping image {i+1} by user command.")
-                i += 1
-                continue
-
-            if self.app.regenerate_alt_service_event.is_set():
-                self.app.regenerate_alt_service_event.clear()
-                logger.warning(f"Attempting to regenerate image {i+1} with alternate service.")
-                with self.app.image_api_lock:
-                    alt_service = "recraft" if self.app.active_image_api == "pollinations" else "pollinations"
-                
-                success_alt = False
-                if alt_service == "pollinations":
-                    success_alt = self.poll_api.generate_image(prompt, image_path)
-                elif alt_service == "recraft":
-                    success_alt, _ = self.recraft_api.generate_image(prompt, image_path)
-
-                if success_alt:
-                    consecutive_failures = 0
-                    self.app.image_prompts_map[image_path] = prompt
-                    self.app.root.after(0, self.app._add_image_to_gallery, image_path, task_key)
-                    if status_key in self.app.task_completion_status:
-                        self.app.task_completion_status[status_key]["images_generated"] += 1
-                        total = self.app.task_completion_status[status_key].get("total_images", 0)
-                        done = self.app.task_completion_status[status_key]["images_generated"]
-                        self.app.task_completion_status[status_key]['steps'][step_name] = f"{done}/{total}"
-                        if is_rewrite:
-                            self.app.root.after(0, self.app.update_rewrite_task_status_display)
-                        else:
-                            self.app.root.after(0, self.app.update_task_status_display)
-                else:
-                    logger.error(f"Alternate service [{alt_service.capitalize()}] also failed to generate image {i+1}.")
-                
-                i += 1
-                continue
             
-            success = False
-            if current_api_for_generation == "pollinations":
-                success = self.poll_api.generate_image(prompt, image_path)
-            elif current_api_for_generation == "recraft":
-                success, _ = self.recraft_api.generate_image(prompt, image_path)
-
-            if success:
-                consecutive_failures = 0 
-                self.app.image_prompts_map[image_path] = prompt
+            consecutive_failures = 0
+            image_generated = False
+            
+            while not image_generated:
+                if not self.app._check_app_state(): break
                 
+                with self.app.image_api_lock:
+                    current_api_for_generation = self.app.active_image_api_var.get()
+
+                progress_text = f"Завд.{task_num}/{total_tasks} | {lang_name} - [{current_api_for_generation.capitalize()}] {self.app._t('step_gen_images')} {i+1}/{len(prompts)} (Спроба {consecutive_failures + 1})..."
+                self.app.update_progress(progress_text, queue_type=queue_type)
+
+                if self.app.skip_image_event.is_set():
+                    self.app.skip_image_event.clear()
+                    logger.warning(f"Skipping image {i+1} by user command.")
+                    break
+
+                if self.app.regenerate_alt_service_event.is_set():
+                    self.app.regenerate_alt_service_event.clear()
+                    logger.warning(f"Attempting to regenerate image {i+1} with alternate service.")
+                    with self.app.image_api_lock:
+                        alt_service = "recraft" if current_api_for_generation == "pollinations" else "pollinations"
+                    
+                    success_alt = False
+                    if alt_service == "pollinations":
+                        success_alt = self.poll_api.generate_image(prompt, image_path)
+                    elif alt_service == "recraft":
+                        success_alt, _ = self.recraft_api.generate_image(prompt, image_path)
+
+                    if success_alt:
+                        image_generated = True
+                    else:
+                        logger.error(f"Alternate service [{alt_service.capitalize()}] also failed to generate image {i+1}.")
+                    break
+
+                success = False
+                if current_api_for_generation == "pollinations":
+                    success = self.poll_api.generate_image(prompt, image_path)
+                elif current_api_for_generation == "recraft":
+                    success, _ = self.recraft_api.generate_image(prompt, image_path)
+
+                if success:
+                    image_generated = True
+                else:
+                    consecutive_failures += 1
+                    logger.error(f"[{current_api_for_generation.capitalize()}] Failed to generate image {i+1}. Consecutive failures: {consecutive_failures}.")
+                    
+                    if auto_switch_enabled and consecutive_failures >= retry_limit_for_switch:
+                        logger.warning(f"Reached {consecutive_failures} consecutive failures. Triggering automatic service switch for ONE image.")
+                        alt_service = "recraft" if current_api_for_generation == "pollinations" else "pollinations"
+                        
+                        success_alt = False
+                        if alt_service == "pollinations":
+                            success_alt = self.poll_api.generate_image(prompt, image_path)
+                        elif alt_service == "recraft":
+                            success_alt, _ = self.recraft_api.generate_image(prompt, image_path)
+                        
+                        if success_alt:
+                            image_generated = True
+                        else:
+                            logger.error(f"Alternate service [{alt_service.capitalize()}] also failed to generate image {i+1}. Skipping this image.")
+                        break
+                    
+                    if consecutive_failures >= 5:
+                        self.app._update_button_states(is_processing=True, is_image_stuck=True)
+                        self.tg_api.send_message_with_buttons(
+                            message="❌ *Помилка генерації зображення*\n\nНе вдається згенерувати зображення\\. Процес очікує\\. Оберіть дію:",
+                            buttons=[
+                                {"text": "Пропустити", "callback_data": "skip_image_action"},
+                                {"text": "Спробувати іншим", "callback_data": "regenerate_alt_action"},
+                            ]
+                        )
+                        while not (self.app.skip_image_event.is_set() or self.app.regenerate_alt_service_event.is_set()):
+                            if not self.app._check_app_state():
+                                break
+                            time.sleep(0.5)
+                        
+                        self.app._update_button_states(is_processing=True, is_image_stuck=False)
+
+            if image_generated:
+                self.app.image_prompts_map[image_path] = prompt
                 self.app.root.after(0, self.app._add_image_to_gallery, image_path, task_key)
                 if self.firebase_api.is_initialized:
                     task_name = data['task'].get('task_name', f"Task {task_key[0]}")
@@ -731,42 +758,8 @@ class WorkflowManager:
                         self.app.root.after(0, self.app.update_rewrite_task_status_display)
                     else:
                         self.app.root.after(0, self.app.update_task_status_display)
-                i += 1 
-            else:
-                consecutive_failures += 1
-                logger.error(f"[{current_api_for_generation.capitalize()}] Failed to generate image {i+1}. Consecutive failures: {consecutive_failures}.")
-                
-                if auto_switch_enabled and consecutive_failures >= retry_limit_for_switch:
-                    logger.warning(f"Reached {consecutive_failures} consecutive failures. Triggering automatic service switch.")
-                    with self.app.image_api_lock:
-                        new_service = "recraft" if self.app.active_image_api == "pollinations" else "pollinations"
-                        self.app.active_image_api = new_service
-                        self.app.active_image_api_var.set(new_service)
-                        logger.warning(f"Service automatically switched to: {self.app.active_image_api.capitalize()}")
-                    consecutive_failures = 0
-                    continue 
-
-                manual_intervention_limit = self.config.get("pollinations", {}).get("retries", 5)
-                if consecutive_failures >= manual_intervention_limit:
-                    logger.error(f"{manual_intervention_limit} consecutive failures for one image. Activating manual controls.")
-                    self.app._update_button_states(is_processing=True, is_image_stuck=True)
-                    self.tg_api.send_message_with_buttons(
-                        message="❌ *Помилка генерації зображення*\n\nНе вдається згенерувати зображення\\. Процес очікує\\. Оберіть дію:",
-                        buttons=[
-                            {"text": "Пропустити", "callback_data": "skip_image_action"},
-                            {"text": "Спробувати іншим", "callback_data": "regenerate_alt_action"},
-                            {"text": "Перемкнути назавжди", "callback_data": "switch_service_action"}
-                        ]
-                    )
-                    while not (self.app.skip_image_event.is_set() or self.app.regenerate_alt_service_event.is_set()):
-                        if not self.app._check_app_state():
-                            break
-                        time.sleep(0.5)
-                    
-                    self.app._update_button_states(is_processing=True, is_image_stuck=False)
-                    continue
-                
-                i += 1
+            
+            i += 1
         
         return True
 
