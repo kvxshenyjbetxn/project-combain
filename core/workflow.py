@@ -823,24 +823,44 @@ class WorkflowManager:
                     self.app.task_completion_status[status_key]['audio_generated'] = 0
                     self.app.task_completion_status[status_key]['subs_generated'] = 0
                 
-                for i, chunk in enumerate(text_chunks):
-                    audio_task = AudioPipelineItem(
-                        text_chunk=chunk,
-                        output_path=os.path.join(temp_dir, f"audio_chunk_{i}.mp3"),
-                        lang_config=lang_config, lang_code=lang_code,
-                        chunk_index=i, total_chunks=len(text_chunks),
-                        task_key=str(task_key)
-                    )
-                    self.audio_worker_pool.add_audio_task(audio_task)
+                # Розділяємо на звичайні TTS та асинхронний Voicemaker
+                if tts_service == "voicemaker":
+                    # Для Voicemaker: створюємо завдання та відправляємо асинхронно
+                    voicemaker_items = []
+                    for i, chunk in enumerate(text_chunks):
+                        audio_task = AudioPipelineItem(
+                            text_chunk=chunk,
+                            output_path=os.path.join(temp_dir, f"audio_chunk_{i}.mp3"),
+                            lang_config=lang_config, lang_code=lang_code,
+                            chunk_index=i, total_chunks=len(text_chunks),
+                            task_key=str(task_key)
+                        )
+                        voicemaker_items.append(audio_task)
+                    
+                    # Відправляємо всі Voicemaker завдання асинхронно з затримками
+                    self.audio_worker_pool.submit_voicemaker_tasks_async(voicemaker_items)
+                else:
+                    # Для звичайних TTS (ElevenLabs, Speechify): додаємо в чергу воркерів
+                    for i, chunk in enumerate(text_chunks):
+                        audio_task = AudioPipelineItem(
+                            text_chunk=chunk,
+                            output_path=os.path.join(temp_dir, f"audio_chunk_{i}.mp3"),
+                            lang_config=lang_config, lang_code=lang_code,
+                            chunk_index=i, total_chunks=len(text_chunks),
+                            task_key=str(task_key)
+                        )
+                        self.audio_worker_pool.add_audio_task(audio_task)
 
             logger.info(f"Всього відправлено на озвучку: {total_audio_chunks_expected} фрагментів.")
             logger.info(f"Очікується {total_transcriptions_expected} транскрипцій після обробки аудіо.")
 
             completed_audio_count = 0
+            voicemaker_check_interval = 2.0  # Перевіряємо Voicemaker кожні 2 секунди
 
             while completed_audio_count < total_audio_chunks_expected and not self.app.shutdown_event.is_set():
                 try:
-                    result = self.audio_worker_pool.audio_results_queue.get(timeout=1.0)
+                    # Перевіряємо звичайні TTS результати (ElevenLabs, Speechify)
+                    result = self.audio_worker_pool.audio_results_queue.get(timeout=0.5)
                     completed_audio_count += 1
 
                     if not result.success:
@@ -859,44 +879,39 @@ class WorkflowManager:
                         self.app.task_completion_status[status_key]['audio_generated'] += 1
                         self.app.root.after(0, self.app.update_task_status_display)
 
+                    # Для НЕ-Voicemaker: одразу відправляємо на транскрипцію
                     if task_info['tts_service'] != 'voicemaker':
                         trans_item = TranscriptionPipelineItem(result.item.output_path, os.path.dirname(result.item.output_path), result.item.chunk_index, result.item.lang_code, task_key)
                         self.audio_worker_pool.add_transcription_task(trans_item)
+                    # Для Voicemaker: перевіряємо чи всі частини готові для склеювання
                     elif len(task_info['completed_audio_items']) == task_info['total_chunks']:
-                        sorted_items = sorted(task_info['completed_audio_items'], key=lambda x: x.chunk_index)
-                        audio_paths_to_merge = [item.output_path for item in sorted_items]
+                        self._process_voicemaker_group(task_info, task_key, num_parallel_chunks)
                         
-                        # Для Voicemaker: розбиваємо всі аудіочастини на рівно num_parallel_chunks груп
-                        total_audio_chunks = len(audio_paths_to_merge)
-                        chunks_per_group = total_audio_chunks // num_parallel_chunks
-                        remaining_chunks = total_audio_chunks % num_parallel_chunks
-                        
-                        logger.info(f"Voicemaker: Склеювання {total_audio_chunks} аудіочастин у {num_parallel_chunks} фінальних файлів...")
-                        
-                        groups = []
-                        start_idx = 0
-                        for i in range(num_parallel_chunks):
-                            # Додаємо один додатковий елемент до перших "remaining_chunks" груп
-                            group_size = chunks_per_group + (1 if i < remaining_chunks else 0)
-                            end_idx = start_idx + group_size
-                            if start_idx < total_audio_chunks:
-                                groups.append(audio_paths_to_merge[start_idx:end_idx])
-                            start_idx = end_idx
-                        
-                        # Видаляємо порожні групи
-                        groups = [group for group in groups if group]
-                        
-                        for i, group_list in enumerate(groups):
-                            if not group_list: continue
-                            merged_path = os.path.join(task_info['data']['temp_dir'], f"merged_chunk_{i}.mp3")
-                            if len(group_list) > 1:
-                                if not concatenate_audio_files(group_list, merged_path): continue
-                            else:
-                                shutil.copy(group_list[0], merged_path)
-                            trans_item = TranscriptionPipelineItem(merged_path, os.path.dirname(merged_path), i, result.item.lang_code, task_key, is_merged_group=True)
-                            self.audio_worker_pool.add_transcription_task(trans_item)
                 except queue.Empty:
-                    continue
+                    pass  # Нормально, продовжуємо перевірку
+                
+                # Перевіряємо асинхронні Voicemaker завдання
+                for task_key, task_info in tasks_info.items():
+                    if task_info['tts_service'] == 'voicemaker':
+                        downloaded_items = self.audio_worker_pool.check_voicemaker_progress(task_key)
+                        
+                        for item in downloaded_items:
+                            completed_audio_count += 1
+                            self.app.increment_and_update_progress(queue_type)
+                            task_info['completed_audio_items'].append(item)
+                            
+                            task_key_tuple = eval(task_key)
+                            status_key = self._get_status_key(task_key_tuple[0], task_key_tuple[1], is_rewrite)
+                            if status_key in self.app.task_completion_status:
+                                self.app.task_completion_status[status_key]['audio_generated'] += 1
+                                self.app.root.after(0, self.app.update_task_status_display)
+                        
+                        # Перевіряємо чи всі Voicemaker частини готові
+                        if len(task_info['completed_audio_items']) == task_info['total_chunks']:
+                            self._process_voicemaker_group(task_info, task_key, num_parallel_chunks)
+                
+                # Невелика затримка для ефективності
+                time.sleep(0.1)
 
             logger.info(f"Очікується {total_transcriptions_expected} результатів транскрипції.")
             completed_transcriptions = 0
@@ -948,6 +963,59 @@ class WorkflowManager:
             if self.audio_worker_pool:
                 self.audio_worker_pool.stop()
                 logger.info("[Audio/Subs Master] Пайплайн завершено, воркер пул зупинено.")
+    
+    def _process_voicemaker_group(self, task_info: dict, task_key: str, num_parallel_chunks: int):
+        """Обробляє завершену групу Voicemaker аудіофайлів: склеює та відправляє на транскрипцію."""
+        sorted_items = sorted(task_info['completed_audio_items'], key=lambda x: x.chunk_index)
+        audio_paths_to_merge = [item.output_path for item in sorted_items]
+        
+        # Розбиваємо всі аудіочастини на рівно num_parallel_chunks груп
+        total_audio_chunks = len(audio_paths_to_merge)
+        chunks_per_group = total_audio_chunks // num_parallel_chunks
+        remaining_chunks = total_audio_chunks % num_parallel_chunks
+        
+        logger.info(f"Voicemaker: Склеювання {total_audio_chunks} аудіочастин у {num_parallel_chunks} фінальних файлів для {task_key}...")
+        
+        groups = []
+        start_idx = 0
+        for i in range(num_parallel_chunks):
+            # Додаємо один додатковий елемент до перших "remaining_chunks" груп
+            group_size = chunks_per_group + (1 if i < remaining_chunks else 0)
+            end_idx = start_idx + group_size
+            if start_idx < total_audio_chunks:
+                groups.append(audio_paths_to_merge[start_idx:end_idx])
+            start_idx = end_idx
+        
+        # Видаляємо порожні групи
+        groups = [group for group in groups if group]
+        
+        # Створюємо merged файли та відправляємо на транскрипцію
+        for i, group_list in enumerate(groups):
+            if not group_list: 
+                continue
+                
+            merged_path = os.path.join(task_info['data']['temp_dir'], f"merged_chunk_{i}.mp3")
+            
+            if len(group_list) > 1:
+                if not concatenate_audio_files(group_list, merged_path): 
+                    logger.error(f"Не вдалося склеїти групу {i} для {task_key}")
+                    continue
+            else:
+                shutil.copy(group_list[0], merged_path)
+            
+            # Отримуємо мову з першого елементу групи
+            sample_item = sorted_items[0]
+            trans_item = TranscriptionPipelineItem(
+                merged_path, 
+                os.path.dirname(merged_path), 
+                i, 
+                sample_item.lang_code, 
+                task_key, 
+                is_merged_group=True
+            )
+            self.audio_worker_pool.add_transcription_task(trans_item)
+        
+        logger.info(f"Voicemaker: Склеювання для {task_key} завершено, відправлено {len(groups)} файлів на транскрипцію")
                 
     def _video_download_worker(self, task):
         """
