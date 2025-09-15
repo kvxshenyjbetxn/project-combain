@@ -773,6 +773,7 @@ class WorkflowManager:
 
         tasks_info = {}
         total_audio_chunks_expected = 0
+        total_transcriptions_expected = 0  # Заздалегідь розраховуємо кількість транскрипцій
 
         try:
             for task_key, data in sorted(processing_data.items()):
@@ -799,17 +800,26 @@ class WorkflowManager:
                     continue
 
                 total_audio_chunks_expected += len(text_chunks)
+                
+                # Розраховуємо кількість транскрипцій для цього завдання
+                if tts_service == 'voicemaker' and len(text_chunks) > num_parallel_chunks:
+                    transcription_count = num_parallel_chunks
+                else:
+                    transcription_count = len(text_chunks)
+                
+                total_transcriptions_expected += transcription_count
+                
                 tasks_info[str(task_key)] = {
                     'tts_service': tts_service,
                     'total_chunks': len(text_chunks),
+                    'expected_transcriptions': transcription_count,  # Зберігаємо очікувану кількість
                     'completed_audio_items': [],
                     'data': data
                 }
                 
                 if status_key in self.app.task_completion_status:
                     self.app.task_completion_status[status_key]['total_audio'] = len(text_chunks)
-                    subs_count = num_parallel_chunks if tts_service == 'voicemaker' and len(text_chunks) > num_parallel_chunks else len(text_chunks)
-                    self.app.task_completion_status[status_key]['total_subs'] = subs_count
+                    self.app.task_completion_status[status_key]['total_subs'] = transcription_count
                     self.app.task_completion_status[status_key]['audio_generated'] = 0
                     self.app.task_completion_status[status_key]['subs_generated'] = 0
                 
@@ -824,9 +834,9 @@ class WorkflowManager:
                     self.audio_worker_pool.add_audio_task(audio_task)
 
             logger.info(f"Всього відправлено на озвучку: {total_audio_chunks_expected} фрагментів.")
+            logger.info(f"Очікується {total_transcriptions_expected} транскрипцій після обробки аудіо.")
 
             completed_audio_count = 0
-            total_transcriptions_submitted = 0
 
             while completed_audio_count < total_audio_chunks_expected and not self.app.shutdown_event.is_set():
                 try:
@@ -852,12 +862,29 @@ class WorkflowManager:
                     if task_info['tts_service'] != 'voicemaker':
                         trans_item = TranscriptionPipelineItem(result.item.output_path, os.path.dirname(result.item.output_path), result.item.chunk_index, result.item.lang_code, task_key)
                         self.audio_worker_pool.add_transcription_task(trans_item)
-                        total_transcriptions_submitted += 1
                     elif len(task_info['completed_audio_items']) == task_info['total_chunks']:
                         sorted_items = sorted(task_info['completed_audio_items'], key=lambda x: x.chunk_index)
                         audio_paths_to_merge = [item.output_path for item in sorted_items]
                         
-                        groups = [audio_paths_to_merge[i:i + num_parallel_chunks] for i in range(0, len(audio_paths_to_merge), num_parallel_chunks)]
+                        # Для Voicemaker: розбиваємо всі аудіочастини на рівно num_parallel_chunks груп
+                        total_audio_chunks = len(audio_paths_to_merge)
+                        chunks_per_group = total_audio_chunks // num_parallel_chunks
+                        remaining_chunks = total_audio_chunks % num_parallel_chunks
+                        
+                        logger.info(f"Voicemaker: Склеювання {total_audio_chunks} аудіочастин у {num_parallel_chunks} фінальних файлів...")
+                        
+                        groups = []
+                        start_idx = 0
+                        for i in range(num_parallel_chunks):
+                            # Додаємо один додатковий елемент до перших "remaining_chunks" груп
+                            group_size = chunks_per_group + (1 if i < remaining_chunks else 0)
+                            end_idx = start_idx + group_size
+                            if start_idx < total_audio_chunks:
+                                groups.append(audio_paths_to_merge[start_idx:end_idx])
+                            start_idx = end_idx
+                        
+                        # Видаляємо порожні групи
+                        groups = [group for group in groups if group]
                         
                         for i, group_list in enumerate(groups):
                             if not group_list: continue
@@ -868,13 +895,12 @@ class WorkflowManager:
                                 shutil.copy(group_list[0], merged_path)
                             trans_item = TranscriptionPipelineItem(merged_path, os.path.dirname(merged_path), i, result.item.lang_code, task_key, is_merged_group=True)
                             self.audio_worker_pool.add_transcription_task(trans_item)
-                            total_transcriptions_submitted += 1
                 except queue.Empty:
                     continue
 
-            logger.info(f"Очікується {total_transcriptions_submitted} результатів транскрипції.")
+            logger.info(f"Очікується {total_transcriptions_expected} результатів транскрипції.")
             completed_transcriptions = 0
-            while completed_transcriptions < total_transcriptions_submitted and not self.app.shutdown_event.is_set():
+            while completed_transcriptions < total_transcriptions_expected and not self.app.shutdown_event.is_set():
                 try:
                     result_item = self.transcription_results_queue.get(timeout=1.0)
                     completed_transcriptions += 1
