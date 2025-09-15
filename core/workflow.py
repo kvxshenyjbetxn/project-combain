@@ -814,7 +814,8 @@ class WorkflowManager:
                     'total_chunks': len(text_chunks),
                     'expected_transcriptions': transcription_count,  # Зберігаємо очікувану кількість
                     'completed_audio_items': [],
-                    'data': data
+                    'data': data,
+                    'processed_voicemaker_group': False  # Флаг для уникнення повторної обробки Voicemaker
                 }
                 
                 if status_key in self.app.task_completion_status:
@@ -881,10 +882,13 @@ class WorkflowManager:
 
                     # Для НЕ-Voicemaker: одразу відправляємо на транскрипцію
                     if task_info['tts_service'] != 'voicemaker':
+                        logger.info(f"Відправка аудіо на транскрипцію: {result.item.output_path} (task: {task_key}, chunk: {result.item.chunk_index})")
                         trans_item = TranscriptionPipelineItem(result.item.output_path, os.path.dirname(result.item.output_path), result.item.chunk_index, result.item.lang_code, task_key)
                         self.audio_worker_pool.add_transcription_task(trans_item)
-                    # Для Voicemaker: перевіряємо чи всі частини готові для склеювання
-                    elif len(task_info['completed_audio_items']) == task_info['total_chunks']:
+                    # Для Voicemaker: перевіряємо чи всі частини готові для склеювання та чи не було обробки раніше
+                    elif (len(task_info['completed_audio_items']) == task_info['total_chunks'] and 
+                          not task_info['processed_voicemaker_group']):
+                        task_info['processed_voicemaker_group'] = True  # Встановлюємо флаг
                         self._process_voicemaker_group(task_info, task_key, num_parallel_chunks)
                         
                 except queue.Empty:
@@ -906,8 +910,10 @@ class WorkflowManager:
                                 self.app.task_completion_status[status_key]['audio_generated'] += 1
                                 self.app.root.after(0, self.app.update_task_status_display)
                         
-                        # Перевіряємо чи всі Voicemaker частини готові
-                        if len(task_info['completed_audio_items']) == task_info['total_chunks']:
+                        # Перевіряємо чи всі Voicemaker частини готові та чи не було обробки раніше
+                        if (len(task_info['completed_audio_items']) == task_info['total_chunks'] and 
+                            not task_info['processed_voicemaker_group']):
+                            task_info['processed_voicemaker_group'] = True  # Встановлюємо флаг
                             self._process_voicemaker_group(task_info, task_key, num_parallel_chunks)
                 
                 # Невелика затримка для ефективності
@@ -919,6 +925,7 @@ class WorkflowManager:
                 try:
                     result_item = self.transcription_results_queue.get(timeout=1.0)
                     completed_transcriptions += 1
+                    logger.info(f"Отримано результат транскрипції {completed_transcriptions}/{total_transcriptions_expected} для {result_item.task_key}")
                     
                     if result_item.subs_path:
                         self.app.increment_and_update_progress(queue_type)
@@ -933,8 +940,11 @@ class WorkflowManager:
                         if status_key in self.app.task_completion_status:
                             self.app.task_completion_status[status_key]['subs_generated'] += 1
                             self.app.root.after(0, self.app.update_task_status_display)
+                    else:
+                        logger.warning(f"Транскрипція для {result_item.task_key} не створена (subs_path = None)")
 
                 except queue.Empty:
+                    logger.debug(f"Очікування транскрипції... ({completed_transcriptions}/{total_transcriptions_expected})")
                     continue
 
             for tk, info in tasks_info.items():

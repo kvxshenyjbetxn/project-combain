@@ -224,6 +224,7 @@ class AudioWorkerPool:
         self.audio_queue.put(item)
 
     def add_transcription_task(self, item: TranscriptionPipelineItem):
+        logger.info(f"Додання завдання транскрипції в чергу: {item.task_key} chunk {item.chunk_index}, audio_path: {item.audio_path}")
         self.transcription_queue.put(item)
     
     def submit_voicemaker_tasks_async(self, items: list) -> str:
@@ -271,7 +272,10 @@ class AudioWorkerPool:
                 item = self.transcription_queue.get(timeout=1)
                 if item is None: break
 
+                logger.info(f"TranscriptionWorker: Отримано завдання {item.task_key} chunk {item.chunk_index}, audio_path: {item.audio_path}")
+
                 if item.audio_path is None:
+                    logger.warning(f"TranscriptionWorker: audio_path = None для {item.task_key} chunk {item.chunk_index}")
                     item.subs_path = None
                     self.app.workflow_manager.transcription_results_queue.put(item)
                     self.transcription_queue.task_done()
@@ -281,9 +285,14 @@ class AudioWorkerPool:
                     self.app.log_context.parallel_task = 'Transcription'
                     self.app.log_context.worker_id = 'Transcribe'
                 
-                logger.info(f"TranscriptionWorker: Початок {item.task_key} chunk {item.chunk_index}")
+                logger.info(f"TranscriptionWorker: Початок транскрипції {item.task_key} chunk {item.chunk_index}")
                 subs_path = self._generate_transcription_chunk(item)
                 item.subs_path = subs_path
+                
+                if subs_path:
+                    logger.info(f"TranscriptionWorker: Успішно створено транскрипцію для {item.task_key} chunk {item.chunk_index}: {subs_path}")
+                else:
+                    logger.error(f"TranscriptionWorker: Не вдалося створити транскрипцію для {item.task_key} chunk {item.chunk_index}")
                 
                 self.app.workflow_manager.transcription_results_queue.put(item)
                 
