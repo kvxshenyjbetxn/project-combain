@@ -173,7 +173,30 @@ class WorkflowManager:
             for step in common_steps:
                 if steps.get(step):
                     if step in ['audio', 'create_subtitles']:
-                        self.app.total_individual_steps += num_chunks
+                        # Розраховуємо фактичну кількість частин для аудіо/субтитрів
+                        lang_config = self.config["languages"][lang_code]
+                        tts_service = lang_config.get("tts_service", "elevenlabs")
+                        
+                        if tts_service == "voicemaker":
+                            # Для Voicemaker потрібно розрахувати реальну кількість частин на основі тексту
+                            text_to_process = task.get('input_text', '')
+                            if is_rewrite and 'transcribed_text' in task:
+                                text_to_process = task['transcribed_text']
+                            
+                            voicemaker_limit = self.config.get("voicemaker", {}).get("char_limit", 2900)
+                            if len(text_to_process) > voicemaker_limit:
+                                text_chunks = chunk_text_voicemaker(text_to_process, voicemaker_limit)
+                                actual_chunks = len(text_chunks)
+                                # Для субтитрів Voicemaker використовує num_chunks груп після злиття
+                                if step == 'create_subtitles':
+                                    self.app.total_individual_steps += min(num_chunks, actual_chunks)
+                                else:  # audio
+                                    self.app.total_individual_steps += actual_chunks
+                            else:
+                                self.app.total_individual_steps += 1
+                        else:
+                            # Для інших TTS сервісів використовуємо стандартну логіку
+                            self.app.total_individual_steps += num_chunks
                     elif step == 'create_video':
                         self.app.total_individual_steps += num_chunks
                         self.app.total_individual_steps += 1
