@@ -704,10 +704,12 @@ class WorkflowManager:
 
                 if success:
                     image_generated = True
+                    consecutive_failures = 0  # Скидаємо лічильник при успішній генерації
                 else:
                     consecutive_failures += 1
                     logger.error(f"[{current_api_for_generation.capitalize()}] Failed to generate image {i+1}. Consecutive failures: {consecutive_failures}.")
                     
+                    # Автоматичне перемикання після 10 невдач (якщо увімкнене)
                     if auto_switch_enabled and consecutive_failures >= retry_limit_for_switch:
                         logger.warning(f"Reached {consecutive_failures} consecutive failures. Triggering automatic service switch for ONE image.")
                         alt_service = "recraft" if current_api_for_generation == "pollinations" else "pollinations"
@@ -720,11 +722,14 @@ class WorkflowManager:
                         
                         if success_alt:
                             image_generated = True
+                            consecutive_failures = 0  # Скидаємо лічильник після успішного автоперемикання
+                            logger.info(f"Successfully generated image {i+1} using alternate service [{alt_service.capitalize()}]. Returning to main service.")
                         else:
                             logger.error(f"Alternate service [{alt_service.capitalize()}] also failed to generate image {i+1}. Skipping this image.")
                         break
                     
-                    if consecutive_failures >= 5:
+                    # Показуємо кнопки після 5 невдач, але поводимося по-різному залежно від налаштувань
+                    if consecutive_failures >= 5 and consecutive_failures % 5 == 0:  # Показуємо кнопки кожні 5 спроб
                         self.app._update_button_states(is_processing=True, is_image_stuck=True)
                         self.tg_api.send_message_with_buttons(
                             message="❌ *Помилка генерації зображення*\n\nНе вдається згенерувати зображення\\. Процес очікує\\. Оберіть дію:",
@@ -733,12 +738,35 @@ class WorkflowManager:
                                 {"text": "Спробувати іншим", "callback_data": "regenerate_alt_action"},
                             ]
                         )
-                        while not (self.app.skip_image_event.is_set() or self.app.regenerate_alt_service_event.is_set()):
-                            if not self.app._check_app_state():
-                                break
-                            time.sleep(0.5)
                         
-                        self.app._update_button_states(is_processing=True, is_image_stuck=False)
+                        # Якщо автоперемикання вимкнене, чекаємо недовго на дію користувача і продовжуємо нескінченні спроби
+                        if not auto_switch_enabled:
+                            wait_time = 0
+                            while wait_time < 5 and not (self.app.skip_image_event.is_set() or self.app.regenerate_alt_service_event.is_set()):
+                                if not self.app._check_app_state():
+                                    break
+                                time.sleep(0.5)
+                                wait_time += 0.5
+                            self.app._update_button_states(is_processing=True, is_image_stuck=False)
+                            
+                            # Якщо користувач не вибрав дію, продовжуємо нескінченні спроби
+                            if not (self.app.skip_image_event.is_set() or self.app.regenerate_alt_service_event.is_set()):
+                                logger.info(f"No user action received. Continuing infinite attempts for image {i+1}...")
+                                time.sleep(2)  # Короткий відпочинок перед наступною спробою
+                        else:
+                            # Якщо автоперемикання увімкнене, чекаємо недовго на дію користувача і продовжуємо спроби
+                            wait_time = 0
+                            while wait_time < 5 and not (self.app.skip_image_event.is_set() or self.app.regenerate_alt_service_event.is_set()):
+                                if not self.app._check_app_state():
+                                    break
+                                time.sleep(0.5)
+                                wait_time += 0.5
+                            self.app._update_button_states(is_processing=True, is_image_stuck=False)
+                            
+                            # Якщо користувач не вибрав дію, продовжуємо спроби до автоперемикання
+                            if not (self.app.skip_image_event.is_set() or self.app.regenerate_alt_service_event.is_set()):
+                                logger.info(f"No user action received. Continuing attempts for image {i+1}...")
+                                time.sleep(2)  # Короткий відпочинок перед наступною спробою
 
             if image_generated:
                 self.app.image_prompts_map[image_path] = prompt
