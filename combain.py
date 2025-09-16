@@ -760,9 +760,6 @@ class TranslationApp:
         self.update_queue_display()
         logger.info(f"Додано нове завдання '{task_name}' на початок черги. Загальна кількість: {len(self.task_queue)}")
         
-        if not silent:
-            messagebox.showinfo(self._t('queue_title'), self._t('info_task_added'))
-        
         self.clear_language_output_path_widgets()
         return True
 
@@ -2337,7 +2334,7 @@ class TranslationApp:
             # Додаємо всі нові завдання на початок черги, зберігаючи їх порядок
             self.task_queue = tasks_to_add + self.task_queue
             self.update_queue_display()
-            messagebox.showinfo(self._t('queue_title'), self._t('info_new_tasks_added', count=len(tasks_to_add)))
+            # messagebox.showinfo(self._t('queue_title'), self._t('info_new_tasks_added', count=len(tasks_to_add)))
         else:
             messagebox.showinfo(self._t('queue_title'), self._t('info_no_new_files_or_links'))
 

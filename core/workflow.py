@@ -200,29 +200,22 @@ class WorkflowManager:
         logger.info(f"Загальна кількість підготовчих кроків для всіх завдань: {self.app.total_individual_steps}")
         self.app.update_individual_progress('main')
 
-        # Обробляємо завдання послідовно для підготовчих етапів
-        all_processing_data = {}
-        
+        # Етап 0: Завантаження та транскрипція (тільки для rewrite)
+        for task in queue_to_process:
+            if task.get('type') == 'Rewrite':
+                logger.info(f"Етап 0: Завантаження та транскрипція для завдання '{task.get('task_name')}'")
+                self._process_transcription_phase(task)
+
+        # Етап 1: Одночасна обробка тексту для ВСІХ завдань
+        logger.info("Етап 1: Одночасна обробка тексту для всіх завдань...")
+        text_processing_jobs = []
         for task in queue_to_process:
             is_rewrite = task.get('type') == 'Rewrite'
             queue_type = 'rewrite' if is_rewrite else 'main'
-            
-            try:
-                # Етап 0: Завантаження та транскрипція (тільки для rewrite)
-                if is_rewrite:
-                    logger.info(f"Етап 0: Завантаження та транскрипція для завдання '{task.get('task_name')}'")
-                    self._process_transcription_phase(task)
-
-                # Етап 1: Обробка тексту (переклад/рерайт, CTA, промпти)
-                logger.info(f"Етап 1: Обробка тексту для завдання '{task.get('task_name')}'")
-                task_processing_data = self._process_text_phase(task, is_rewrite, queue_type)
-                
-                # Зберігаємо дані для подальшого використання в монтажі
-                for task_key, data in task_processing_data.items():
-                    all_processing_data[task_key] = data
-
-            except Exception as e:
-                logger.exception(f"Помилка при обробці підготовчих етапів для завдання {task.get('task_name')}: {e}")
+            for lang_code in task['selected_langs']:
+                text_processing_jobs.append((task, lang_code, is_rewrite, queue_type))
+        
+        all_processing_data = self._process_all_text_phases_concurrently(text_processing_jobs)
 
         # Етап 2: Генерація зображень та аудіо/субтитрів для всіх завдань паралельно
         logger.info("Етап 2: Генерація зображень та аудіо/субтитрів для всіх завдань")
@@ -289,28 +282,28 @@ class WorkflowManager:
                     self.app.task_completion_status[status_key]['steps'][step_name_key_transcribe] = "Готово"
             self.app.root.after(0, self.app.update_task_status_display)
 
-    def _process_text_phase(self, task, is_rewrite, queue_type):
-        """Обробляє текстові етапи для одного завдання (переклад/рерайт, CTA, промпти)"""
-        processing_data = {}
-        
+    def _process_all_text_phases_concurrently(self, text_processing_jobs):
+        """Обробляє всі текстові етапи для всіх завдань одночасно."""
+        all_processing_data = {}
         with concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-            text_futures = {}
-            worker = self._rewrite_text_processing_worker if is_rewrite else self._text_processing_worker
+            future_to_task_key = {}
+            for job in text_processing_jobs:
+                task, lang_code, is_rewrite, queue_type = job
+                worker = self._rewrite_text_processing_worker if is_rewrite else self._text_processing_worker
+                task_key = (task['task_index'], lang_code)
+                all_processing_data[task_key] = {'task': task}
+                future = executor.submit(worker, self.app, task, lang_code, queue_type)
+                future_to_task_key[future] = task_key
 
-            if is_rewrite and 'transcribed_text' not in task:
-                pass
-            else:
-                for lang_code in task['selected_langs']:
-                    task_key = (task['task_index'], lang_code)
-                    processing_data[task_key] = {'task': task} 
-                    future = executor.submit(worker, self.app, task, lang_code, queue_type)
-                    text_futures[future] = task_key
-            
-            for future in concurrent.futures.as_completed(text_futures):
-                task_key = text_futures[future]
-                processing_data[task_key]['text_results'] = future.result()
-
-        return processing_data
+            for future in concurrent.futures.as_completed(future_to_task_key):
+                task_key = future_to_task_key[future]
+                try:
+                    result = future.result()
+                    all_processing_data[task_key]['text_results'] = result
+                except Exception as exc:
+                    logger.error(f"Помилка при обробці текстового етапу для {task_key}: {exc}")
+                    all_processing_data[task_key]['text_results'] = None
+        return all_processing_data
 
     def _process_media_generation_phase(self, all_processing_data, queue_to_process):
         """Обробляє генерацію зображень та аудіо/субтитрів для всіх завдань паралельно"""
