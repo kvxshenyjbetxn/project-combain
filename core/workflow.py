@@ -95,18 +95,20 @@ class WorkflowManager:
             # Оновлюємо відображення в GUI з початковими статусами "Очікує"
             self.app.root.after(0, self.app.update_queue_display)
 
-            for i, task in enumerate(queue_to_process):
-                if not self.app._check_app_state():
-                    logger.warning("Обробку черги зупинено користувачем.")
-                    break
-                
-                task_type = task.get('type')
-                queue_type_arg = 'main' if task_type == 'Translate' else 'rewrite'
-                
-                logger.info(f"Початок обробки завдання {i+1}/{len(queue_to_process)} типу '{task_type}': {task.get('task_name')}")
-                # _process_hybrid_queue тепер обробляє ОДНЕ завдання
-                self._process_hybrid_queue([task], queue_type_arg)
-                logger.info(f"Завершено обробку завдання: {task.get('task_name')}")
+            # НОВИЙ ПІДХІД: спочатку всі підготовчі етапи для всіх завдань, потім монтаж
+            self._process_all_preparation_phases(queue_to_process)
+            
+            # Перевірка контролю зображень перед монтажем
+            if self.config.get("ui_settings", {}).get("image_control_enabled", False):
+                self.app.root.after(0, lambda: messagebox.showinfo("Процес призупинено", "Всі підготовчі етапи завершено!\n\nПерегляньте галерею та натисніть 'Продовжити монтаж'."))
+                if self.firebase_api and self.firebase_api.is_initialized: 
+                    self.firebase_api.send_montage_ready_status()
+                logger.info("WORKFLOW PAUSED. Waiting for user to press 'Continue Montage' button...")
+                self.app.image_control_active.wait()
+                logger.info("WORKFLOW RESUMED after user confirmation.")
+            
+            # Тепер виконуємо монтаж для всіх завдань
+            self._process_all_montage_phase(queue_to_process)
             
             if self.app._check_app_state():
                 logger.info("Обробку всіх завдань у єдиній черзі завершено.")
@@ -122,6 +124,302 @@ class WorkflowManager:
             if hasattr(self.app, 'pause_resume_button'):
                 self.app.root.after(0, lambda: self.app.pause_resume_button.config(text=self.app._t('pause_button'), state="disabled"))
             self.app.pause_event.set()
+
+    def _process_all_preparation_phases(self, queue_to_process):
+        """Виконує всі підготовчі етапи для всіх завдань (переклад, рерайт, заклик до дії, промпти, озвучка, субтитри, картинки)"""
+        logger.info("Початок виконання всіх підготовчих етапів для всіх завдань...")
+        
+        if self.firebase_api.is_initialized:
+            self.app.stop_command_listener.clear()
+            self.firebase_api.clear_commands()
+            self.firebase_api.clear_montage_ready_status()
+            
+            if self.config.get("firebase", {}).get("auto_clear_gallery", True):
+                self.firebase_api.clear_images()
+                logger.info("Auto-cleared old gallery images from Firebase for new generation session")
+            
+            self.app.command_listener_thread = threading.Thread(target=self.app._command_listener_worker, daemon=True)
+            self.app.command_listener_thread.start()
+            self.app.root.after(100, self.app._process_command_queue)
+
+        self.app._update_button_states(is_processing=True, is_image_stuck=False)
+        self.app.image_control_active.clear()
+
+        # Розрахунок загальних кроків для всіх завдань
+        self.app.completed_individual_steps = 0
+        self.app.total_individual_steps = 0
+        num_chunks = self.config.get('parallel_processing', {}).get('num_chunks', 3)
+        
+        for task in queue_to_process:
+            is_rewrite = task.get('type') == 'Rewrite'
+            
+            if is_rewrite:
+                first_lang_steps = task['steps'][task['selected_langs'][0]]
+                if task.get('source_type') == 'url' and first_lang_steps.get('download'):
+                    self.app.total_individual_steps += 1
+                if first_lang_steps.get('transcribe'):
+                    self.app.total_individual_steps += 1
+
+            for lang_code in task['selected_langs']:
+                steps = task['steps'][lang_code]
+                
+                main_step = 'rewrite' if is_rewrite else 'translate'
+                if steps.get(main_step): self.app.total_individual_steps += 1
+                
+                common_steps = ['cta', 'gen_prompts', 'gen_images', 'audio', 'create_subtitles']
+                for step in common_steps:
+                    if steps.get(step):
+                        if step in ['audio', 'create_subtitles']:
+                            # Розраховуємо фактичну кількість частин для аудіо/субтитрів
+                            lang_config = self.config["languages"][lang_code]
+                            tts_service = lang_config.get("tts_service", "elevenlabs")
+                            
+                            if tts_service == "voicemaker":
+                                # Для Voicemaker потрібно розрахувати реальну кількість частин на основі тексту
+                                text_to_process = task.get('input_text', '')
+                                if is_rewrite and 'transcribed_text' in task:
+                                    text_to_process = task['transcribed_text']
+                                
+                                voicemaker_limit = self.config.get("voicemaker", {}).get("char_limit", 2900)
+                                if len(text_to_process) > voicemaker_limit:
+                                    text_chunks = chunk_text_voicemaker(text_to_process, voicemaker_limit)
+                                    actual_chunks = len(text_chunks)
+                                    # Для субтитрів Voicemaker використовує num_chunks груп після злиття
+                                    if step == 'create_subtitles':
+                                        self.app.total_individual_steps += min(num_chunks, actual_chunks)
+                                    else:  # audio
+                                        self.app.total_individual_steps += actual_chunks
+                                else:
+                                    self.app.total_individual_steps += 1
+                            else:
+                                # Для інших TTS сервісів використовуємо стандартну логіку
+                                self.app.total_individual_steps += num_chunks
+                        else: # gen_images, cta, gen_prompts
+                            self.app.total_individual_steps += 1
+
+        logger.info(f"Загальна кількість підготовчих кроків для всіх завдань: {self.app.total_individual_steps}")
+        self.app.update_individual_progress('main')
+
+        # Обробляємо завдання послідовно для підготовчих етапів
+        all_processing_data = {}
+        
+        for task in queue_to_process:
+            is_rewrite = task.get('type') == 'Rewrite'
+            queue_type = 'rewrite' if is_rewrite else 'main'
+            
+            try:
+                # Етап 0: Завантаження та транскрипція (тільки для rewrite)
+                if is_rewrite:
+                    logger.info(f"Етап 0: Завантаження та транскрипція для завдання '{task.get('task_name')}'")
+                    self._process_transcription_phase(task)
+
+                # Етап 1: Обробка тексту (переклад/рерайт, CTA, промпти)
+                logger.info(f"Етап 1: Обробка тексту для завдання '{task.get('task_name')}'")
+                task_processing_data = self._process_text_phase(task, is_rewrite, queue_type)
+                
+                # Зберігаємо дані для подальшого використання в монтажі
+                for task_key, data in task_processing_data.items():
+                    all_processing_data[task_key] = data
+
+            except Exception as e:
+                logger.exception(f"Помилка при обробці підготовчих етапів для завдання {task.get('task_name')}: {e}")
+
+        # Етап 2: Генерація зображень та аудіо/субтитрів для всіх завдань паралельно
+        logger.info("Етап 2: Генерація зображень та аудіо/субтитрів для всіх завдань")
+        self._process_media_generation_phase(all_processing_data, queue_to_process)
+        
+        # Зберігаємо дані для монтажу
+        self.all_processing_data = all_processing_data
+        logger.info("Всі підготовчі етапи завершено!")
+
+    def _process_transcription_phase(self, task):
+        """Обробляє завантаження та транскрипцію для rewrite завдань"""
+        task_index = task['task_index']
+        step_name_key_transcribe = self.app._t('step_name_transcribe')
+        step_name_key_download = self.app._t('step_name_download')
+
+        if task.get('source_type') == 'url':
+            for lang_code in task['selected_langs']:
+                status_key = self._get_status_key(task_index, lang_code, True)
+                if status_key in self.app.task_completion_status and step_name_key_download in self.app.task_completion_status[status_key]['steps']:
+                    self.app.task_completion_status[status_key]['steps'][step_name_key_download] = "В процесі"
+            self.app.root.after(0, self.app.update_task_status_display)
+            
+            result_path = self._video_download_worker(task)
+            task['mp3_path'] = result_path
+            
+            for lang_code in task['selected_langs']:
+                status_key = self._get_status_key(task_index, lang_code, True)
+                if status_key in self.app.task_completion_status and step_name_key_download in self.app.task_completion_status[status_key]['steps']:
+                    self.app.task_completion_status[status_key]['steps'][step_name_key_download] = "Готово" if result_path else "Помилка"
+            if result_path: self.app.increment_and_update_progress('rewrite')
+            self.app.root.after(0, self.app.update_task_status_display)
+        
+        if 'mp3_path' in task and task['mp3_path']:
+            for lang_code in task['selected_langs']:
+                status_key = self._get_status_key(task_index, lang_code, True)
+                if status_key in self.app.task_completion_status and step_name_key_transcribe in self.app.task_completion_status[status_key]['steps']:
+                    self.app.task_completion_status[status_key]['steps'][step_name_key_transcribe] = "В процесі"
+            self.app.root.after(0, self.app.update_task_status_display)
+
+            mp3_path = task['mp3_path']
+            original_filename = task.get('original_filename', os.path.basename(mp3_path))
+            video_title = sanitize_filename(os.path.splitext(original_filename)[0])
+            task_output_dir = os.path.join(self.config['output_settings']['rewrite_default_dir'], video_title)
+            os.makedirs(task_output_dir, exist_ok=True)
+            original_transcript_path = os.path.join(task_output_dir, "original_transcript.txt")
+            
+            if os.path.exists(original_transcript_path):
+                with open(original_transcript_path, "r", encoding='utf-8') as f:
+                    transcribed_text = f.read()
+            else:
+                model = self.montage_api._load_whisper_model()
+                if not model: return
+                transcription_result = model.transcribe(mp3_path, verbose=False)
+                transcribed_text = transcription_result['text']
+                with open(original_transcript_path, "w", encoding='utf-8') as f: f.write(transcribed_text)
+
+            task['transcribed_text'] = transcribed_text
+            task['video_title'] = video_title
+            self.app.increment_and_update_progress('rewrite')
+
+            for lang_code in task['selected_langs']:
+                status_key = self._get_status_key(task_index, lang_code, True)
+                if status_key in self.app.task_completion_status and step_name_key_transcribe in self.app.task_completion_status[status_key]['steps']:
+                    self.app.task_completion_status[status_key]['steps'][step_name_key_transcribe] = "Готово"
+            self.app.root.after(0, self.app.update_task_status_display)
+
+    def _process_text_phase(self, task, is_rewrite, queue_type):
+        """Обробляє текстові етапи для одного завдання (переклад/рерайт, CTA, промпти)"""
+        processing_data = {}
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+            text_futures = {}
+            worker = self._rewrite_text_processing_worker if is_rewrite else self._text_processing_worker
+
+            if is_rewrite and 'transcribed_text' not in task:
+                pass
+            else:
+                for lang_code in task['selected_langs']:
+                    task_key = (task['task_index'], lang_code)
+                    processing_data[task_key] = {'task': task} 
+                    future = executor.submit(worker, self.app, task, lang_code, queue_type)
+                    text_futures[future] = task_key
+            
+            for future in concurrent.futures.as_completed(text_futures):
+                task_key = text_futures[future]
+                processing_data[task_key]['text_results'] = future.result()
+
+        return processing_data
+
+    def _process_media_generation_phase(self, all_processing_data, queue_to_process):
+        """Обробляє генерацію зображень та аудіо/субтитрів для всіх завдань паралельно"""
+        self.app.root.after(0, self.app.setup_empty_gallery, 'main', queue_to_process)
+        should_gen_images = any(data.get('text_results') and data['task']['steps'][key[1]].get('gen_images') for key, data in all_processing_data.items())
+
+        image_master_thread = threading.Thread(target=self._sequential_image_master, args=(all_processing_data, queue_to_process, 'main', False)) if should_gen_images else None
+        audio_subs_master_thread = threading.Thread(target=self._audio_subs_pipeline_master, args=(all_processing_data, False, 'main'))
+        
+        if image_master_thread: image_master_thread.start()
+        audio_subs_master_thread.start()
+        
+        if image_master_thread: image_master_thread.join()
+        audio_subs_master_thread.join()
+
+    def _process_all_montage_phase(self, queue_to_process):
+        """Виконує монтаж для всіх завдань після підготовчих етапів"""
+        logger.info("Початок етапу монтажу для всіх завдань...")
+        
+        # Додаємо кроки монтажу до загального підрахунку
+        num_chunks = self.config.get('parallel_processing', {}).get('num_chunks', 3)
+        for task in queue_to_process:
+            is_rewrite = task.get('type') == 'Rewrite'
+            for lang_code in task['selected_langs']:
+                steps = task['steps'][lang_code]
+                if steps.get('create_video'):
+                    self.app.total_individual_steps += num_chunks  # chunk videos
+                    self.app.total_individual_steps += 1  # final concatenation
+
+        for task_key, data in sorted(self.all_processing_data.items()):
+            if not self.app._check_app_state():
+                logger.warning("Монтаж зупинено користувачем.")
+                break
+                
+            lang_code = task_key[1]
+            task_idx_str = task_key[0]
+            task = data['task']
+            is_rewrite = task.get('type') == 'Rewrite'
+            queue_type = 'rewrite' if is_rewrite else 'main'
+            status_key = self._get_status_key(task_idx_str, lang_code, is_rewrite)
+            
+            if not (data.get('task') and data.get('text_results') and data['task']['steps'][lang_code].get('create_video')):
+                continue
+
+            images_folder = data['text_results']['images_folder']
+            all_images = sorted([os.path.join(images_folder, f) for f in os.listdir(images_folder) if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
+            
+            if not data.get('audio_chunks') or not data.get('subs_chunks') or not all_images:
+                if status_key in self.app.task_completion_status:
+                    self.app.task_completion_status[status_key]['steps'][self.app._t('step_name_create_video')] = "Помилка"
+                continue
+
+            if status_key in self.app.task_completion_status:
+                self.app.task_completion_status[status_key]['steps'][self.app._t('step_name_create_video')] = "В процесі"
+                self.app.root.after(0, self.app.update_task_status_display)
+
+            image_chunks = np.array_split(all_images, len(data['audio_chunks']))
+            video_chunk_paths = []
+            num_montage_threads = self.config.get('parallel_processing', {}).get('num_chunks', 3)
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=num_montage_threads) as executor:
+                video_futures = {executor.submit(self._video_chunk_worker, self.app, list(image_chunks[i]), data['audio_chunks'][i], data['subs_chunks'][i], os.path.join(data['temp_dir'], f"video_chunk_{i:02d}.mp4"), i + 1, len(data['audio_chunks']), task_key): i for i in range(len(data['audio_chunks']))}
+                
+                video_results = {}
+                for f in concurrent.futures.as_completed(video_futures):
+                    chunk_index = video_futures[f]
+                    result = f.result()
+                    if result: 
+                        video_results[chunk_index] = result
+                        self.app.increment_and_update_progress(queue_type)
+                        
+                video_chunk_paths = [video_results[i] for i in sorted(video_results.keys())]
+
+            if len(video_chunk_paths) == len(data['audio_chunks']):
+                base_name = sanitize_filename(data['text_results'].get('video_title', data['text_results'].get('task_name', f"Task_{task_key[0]}")))
+                final_video_path = os.path.join(data['text_results']['output_path'], f"video_{base_name}_{lang_code}.mp4")
+                
+                if self._concatenate_videos(self.app, video_chunk_paths, final_video_path):
+                    self.app.increment_and_update_progress(queue_type)
+                    if status_key in self.app.task_completion_status:
+                        self.app.task_completion_status[status_key]['steps'][self.app._t('step_name_create_video')] = "Готово"
+                    if is_rewrite and 'original_filename' in data['task']:
+                        self.app.save_processed_link(data['task']['original_filename'])
+                else:
+                    if status_key in self.app.task_completion_status:
+                        self.app.task_completion_status[status_key]['steps'][self.app._t('step_name_create_video')] = "Помилка"
+            else:
+                if status_key in self.app.task_completion_status:
+                    self.app.task_completion_status[status_key]['steps'][self.app._t('step_name_create_video')] = "Помилка"
+            
+            if self.config.get("telegram", {}).get("report_timing", "per_task") == "per_language":
+                self.app.send_task_completion_report(data['task'], single_lang_code=lang_code)
+
+        # Відправляємо звіти для завдань
+        for task in queue_to_process:
+            if self.config.get("telegram", {}).get("report_timing", "per_task") == "per_task":
+                self.app.send_task_completion_report(task)
+        
+        # Очищуємо тимчасові файли
+        if not self.config.get('parallel_processing', {}).get('keep_temp_files', False):
+            for data in self.all_processing_data.values():
+                if 'temp_dir' in data and os.path.exists(data['temp_dir']):
+                    try: shutil.rmtree(data['temp_dir'])
+                    except Exception as e: logger.error(f"Failed to delete temp dir {data['temp_dir']}: {e}")
+
+        self.app.stop_command_listener.set()
+        self.app.completed_individual_steps = self.app.total_individual_steps
+        self.app.update_individual_progress('main')
+        logger.info("Етап монтажу завершено для всіх завдань!")
 
     def _process_hybrid_queue(self, queue_to_process_list, queue_type):
         is_rewrite = queue_type == 'rewrite'
