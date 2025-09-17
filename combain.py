@@ -804,8 +804,15 @@ class TranslationApp:
                                              values=(task_type, self._t('status_pending'), timestamp), open=True)
             
             for lang_code in task['selected_langs']:
-                use_default_dir = self.config.get("output_settings", {}).get("use_default_dir", False)
-                lang_path_display = self._t('use_default_dir_label') if use_default_dir else task.get('lang_output_paths', {}).get(lang_code, '...')
+                # Визначаємо чи це завдання рерайту чи перекладу
+                task_type = task.get('type', 'Translate')
+                if task_type == 'Rewrite':
+                    # Для завдань рерайту завжди використовуємо стандартну папку
+                    lang_path_display = self._t('use_default_rewrite_dir_label')
+                else:
+                    # Для завдань перекладу перевіряємо налаштування
+                    use_default_dir = self.config.get("output_settings", {}).get("use_default_dir", False)
+                    lang_path_display = self._t('use_default_dir_label') if use_default_dir else task.get('lang_output_paths', {}).get(lang_code, '...')
                 
                 lang_progress = self._calculate_language_progress(i, lang_code)
                 lang_progress_text = f"({lang_progress}%)" if lang_progress > 0 else ""
