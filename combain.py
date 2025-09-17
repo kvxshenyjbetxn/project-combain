@@ -551,6 +551,25 @@ class TranslationApp:
         self.root.bind_all("<MouseWheel>", self._on_global_mousewheel)
         self.root.bind_all("<Button-4>", self._on_global_mousewheel)
         self.root.bind_all("<Button-5>", self._on_global_mousewheel)
+        self.root.bind_all("<Key>", self._on_key_release, "+")
+
+    def _on_key_release(self, event):
+        ctrl = (event.state & 0x4) != 0
+        if event.keycode == 88 and ctrl and event.keysym.lower() != "x":
+            # event.widget.event_generate("<<Cut>>")
+            self._handle_cut(event)
+
+        if event.keycode == 86 and ctrl and event.keysym.lower() != "v":
+            # event.widget.event_generate("<<Paste>>")
+            self._handle_paste(event)
+
+        if event.keycode == 67 and ctrl and event.keysym.lower() != "c":
+            # event.widget.event_generate("<<Copy>>")
+            self._handle_copy(event)
+
+        if event.keycode == 65 and ctrl and event.keysym.lower() != "a":
+            # event.widget.event_generate("<<SelectAll>>")
+            self._handle_select_all(event)
 
     def _handle_copy(self, event):
         widget = event.widget
