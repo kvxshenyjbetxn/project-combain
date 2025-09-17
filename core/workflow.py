@@ -119,6 +119,7 @@ class WorkflowManager:
             self.app.root.after(0, lambda: messagebox.showerror(self.app._t('error_title'), self.app._t('error_unexpected_queue')))
         finally:
             self.app.is_processing_queue = False
+            self.app.current_processing_task_index = None  # Скидаємо поточне завдання
             self.app._update_button_states(is_processing=False, is_image_stuck=False)
             self.app.root.after(0, self.app.update_queue_display)
             if hasattr(self.app, 'pause_resume_button'):
@@ -334,6 +335,12 @@ class WorkflowManager:
                     self.app.total_individual_steps += 1  # final concatenation
 
         for task_key, data in sorted(self.all_processing_data.items()):
+            # Встановлюємо поточне завдання, що обробляється
+            task_index = task_key[0]
+            if self.app.current_processing_task_index != task_index:
+                self.app.current_processing_task_index = task_index
+                self.app.root.after(0, self.app.update_queue_display)  # Оновлюємо відображення статусу
+            
             if not self.app._check_app_state():
                 logger.warning("Монтаж зупинено користувачем.")
                 break
@@ -396,6 +403,17 @@ class WorkflowManager:
             
             if self.config.get("telegram", {}).get("report_timing", "per_task") == "per_language":
                 self.app.send_task_completion_report(data['task'], single_lang_code=lang_code)
+
+        # Позначаємо завершені завдання
+        completed_tasks = set()
+        for task_key, data in self.all_processing_data.items():
+            task_index = task_key[0]
+            completed_tasks.add(task_index)
+        
+        # Додаємо завершені завдання до набору
+        self.app.completed_task_indices.update(completed_tasks)
+        self.app.current_processing_task_index = None  # Очищуємо поточне завдання
+        self.app.root.after(0, self.app.update_queue_display)  # Оновлюємо відображення статусу
 
         # Відправляємо звіти для завдань
         for task in queue_to_process:

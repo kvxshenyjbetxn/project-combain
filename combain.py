@@ -175,6 +175,8 @@ class TranslationApp:
         # Unified Queue management
         self.task_queue = []
         self.is_processing_queue = False
+        self.current_processing_task_index = None  # Індекс завдання, що зараз обробляється
+        self.completed_task_indices = set()  # Набір індексів завершених завдань
         self.is_shutting_down = False
         self.dynamic_scrollbars = []
 
@@ -799,9 +801,10 @@ class TranslationApp:
             progress_text = f"({total_progress}%)" if total_progress > 0 else ""
             
             task_type = task.get('type', 'N/A')
+            task_status = self._get_task_status(i)  # Використовуємо новий метод для визначення статусу
             task_node = self.queue_tree.insert("", "end", iid=f"task_{i}",
                                              text=f"{task_name} {progress_text}",
-                                             values=(task_type, self._t('status_pending'), timestamp), open=True)
+                                             values=(task_type, task_status, timestamp), open=True)
             
             for lang_code in task['selected_langs']:
                 # Визначаємо чи це завдання рерайту чи перекладу
@@ -879,6 +882,15 @@ class TranslationApp:
         completed_steps = sum(1 for status in steps.values() if status == "✅")
         
         return int((completed_steps / total_steps * 100)) if total_steps > 0 else 0
+    
+    def _get_task_status(self, task_index):
+        """Визначає статус завдання: очікує, в процесі або готово"""
+        if task_index in self.completed_task_indices:
+            return self._t('status_completed')
+        elif self.current_processing_task_index == task_index and self.is_processing_queue:
+            return self._t('status_processing')
+        else:
+            return self._t('status_pending')
     
     def update_task_status_display(self, task_index=None, lang_code=None, step_key=None, status=None):
         """Оновлює статус конкретного кроку в єдиній черзі завдань."""
@@ -1501,6 +1513,8 @@ class TranslationApp:
     def clear_queue(self):
         if messagebox.askyesno(self._t('confirm_title'), self._t('confirm_clear_queue')):
             self.task_queue.clear()
+            self.completed_task_indices.clear()  # Скидаємо завершені завдання
+            self.current_processing_task_index = None  # Скидаємо поточне завдання
             self.update_queue_display()
             logger.info("Queue cleared.")
 
