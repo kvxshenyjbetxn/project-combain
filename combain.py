@@ -259,12 +259,12 @@ class TranslationApp:
         # Clear old gallery images on startup if auto-clear is enabled
         if self.firebase_api.is_initialized and self.config.get("firebase", {}).get("auto_clear_gallery", True):
             self.firebase_api.clear_images()
-            logger.info("Auto-cleared old gallery images from Firebase on application startup")
+            #logger.info("Auto-cleared old gallery images from Firebase on application startup")
             
         # Clear montage ready status on startup
         if self.firebase_api.is_initialized:
             self.firebase_api.clear_montage_ready_status()
-            logger.info("Cleared montage ready status on application startup")
+            #logger.info("Cleared montage ready status on application startup")
             
         # Відкладаємо оновлення балансів до моменту коли GUI буде готовий
         self.root.after(1000, self.update_startup_balances)
@@ -466,7 +466,7 @@ class TranslationApp:
         # Enable "quiet mode"
         self.is_shutting_down = True
         self.shutdown_event.set() 
-        logger.info("Application shutdown: saving UI settings...")
+        #logger.info("Application shutdown: saving UI settings...")
 
         # Зупиняємо аудіо воркер пул
         if hasattr(self, 'workflow_manager') and self.workflow_manager:
@@ -498,7 +498,7 @@ class TranslationApp:
         try:
             preview_folder = os.path.join(APP_BASE_PATH, "preview")
             if os.path.exists(preview_folder):
-                logger.info("Очищення файлів попереднього перегляду...")
+                #logger.info("Очищення файлів попереднього перегляду...")
                 for filename in os.listdir(preview_folder):
                     if filename.startswith("preview_video_") and filename.endswith(".mp4"):
                         file_path = os.path.join(preview_folder, filename)
