@@ -1374,6 +1374,7 @@ class TranslationApp:
             self.root.after(0, lambda: self.settings_recraft_balance_label.config(text=f"{self._t('balance_label')}: {recraft_text}"))
             self.root.after(0, lambda: self.chain_recraft_balance_label.config(text=f"{self._t('recraft_balance_label')}: {recraft_text}"))
             self.root.after(0, lambda: self.rewrite_recraft_balance_label.config(text=f"{self._t('recraft_balance_label')}: {recraft_text}"))
+            self.root.after(0, lambda: self.queue_recraft_balance_label.config(text=f"{self._t('recraft_balance_label')}: {recraft_text}"))
             logger.info(f"Recraft balance updated: {recraft_balance}")
 
             vm_balance = self.vm_api.get_balance()
@@ -1382,10 +1383,9 @@ class TranslationApp:
                 self.config['voicemaker']['last_known_balance'] = vm_balance
                 save_config(self.config)
             
-            vm_text = vm_balance if vm_balance is not None else 'N/A'
-            self.root.after(0, lambda: self.settings_vm_balance_label.config(text=f"{self._t('balance_label')}: {vm_text}"))
-            self.root.after(0, lambda: self.chain_vm_balance_label.config(text=f"{self._t('voicemaker_balance_label')}: {vm_text}"))
-            self.root.after(0, lambda: self.rewrite_vm_balance_label.config(text=f"{self._t('voicemaker_balance_label')}: {vm_text}"))
+            # Використовуємо utility функцію для оновлення VoiceMaker балансів
+            from utils.voicemaker_utils import update_voicemaker_balance_labels
+            update_voicemaker_balance_labels(self, vm_balance)
             logger.info(f"Voicemaker balance updated: {vm_balance}")
 
         threading.Thread(target=update_thread, daemon=True).start()
