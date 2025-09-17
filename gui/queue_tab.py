@@ -68,6 +68,9 @@ def create_queue_tab(notebook, app):
     app.queue_el_balance_label = ttk.Label(balance_frame, text=f"{app._t('elevenlabs_balance_label')}: N/A")
     app.queue_el_balance_label.pack(side='left', padx=(0,10))
 
+    app.queue_or_balance_label = ttk.Label(balance_frame, text=f"{app._t('openrouter_balance_label')}: N/A")
+    app.queue_or_balance_label.pack(side='left', padx=(0,10))
+
     app.queue_recraft_balance_label = ttk.Label(balance_frame, text=f"{app._t('recraft_balance_label')}: N/A")
     app.queue_recraft_balance_label.pack(side='left', padx=(0,10))
 

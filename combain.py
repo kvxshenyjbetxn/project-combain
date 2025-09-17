@@ -276,6 +276,7 @@ class TranslationApp:
         self.settings_vm_balance_label.config(text=f"{self._t('balance_label')}: {vm_text}")
         self.chain_vm_balance_label.config(text=f"{self._t('voicemaker_balance_label')}: {vm_text}")
         self.rewrite_vm_balance_label.config(text=f"{self._t('voicemaker_balance_label')}: {vm_text}")
+        self.queue_vm_balance_label.config(text=f"{self._t('voicemaker_balance_label')}: {vm_text}")
 
     def _t(self, key, **kwargs):
         translation = self.translations.get(self.lang, {}).get(key, key)
@@ -1329,6 +1330,11 @@ class TranslationApp:
         """Test OpenRouter connection - delegates to utility function."""
         test_openrouter_connection(self)
 
+    def reset_openrouter_balance(self):
+        """Reset OpenRouter balance - delegates to utility function."""
+        from utils.openrouter_utils import reset_openrouter_balance
+        reset_openrouter_balance(self)
+
     def test_pollinations_connection(self):
         """Test Pollinations connection - delegates to utility function."""
         test_pollinations_connection(self)
@@ -1369,6 +1375,12 @@ class TranslationApp:
         def update_thread():
             self.update_elevenlabs_info(update_templates=False)
             
+            # Оновлюємо баланс OpenRouter
+            or_balance = self.or_api.get_balance()
+            from utils.openrouter_utils import update_openrouter_balance_labels
+            update_openrouter_balance_labels(self, or_balance)
+            logger.info(f"OpenRouter balance updated: {or_balance}")
+            
             recraft_balance = self.recraft_api.get_balance()
             recraft_text = recraft_balance if recraft_balance is not None else 'N/A'
             self.root.after(0, lambda: self.settings_recraft_balance_label.config(text=f"{self._t('balance_label')}: {recraft_text}"))
@@ -1396,6 +1408,13 @@ class TranslationApp:
                 # Перевіряємо чи головний потік ще активний
                 if hasattr(self.root, 'after'):
                     self.update_elevenlabs_info(update_templates=True)
+                    
+                    # Оновлюємо баланс OpenRouter
+                    or_balance = self.or_api.get_balance()
+                    from utils.openrouter_utils import update_openrouter_balance_labels
+                    update_openrouter_balance_labels(self, or_balance)
+                    #logger.info(f"OpenRouter startup balance updated: {or_balance}")
+                    
                     recraft_balance = self.recraft_api.get_balance()
                     recraft_text = recraft_balance if recraft_balance is not None else 'N/A'
                     
@@ -1404,6 +1423,7 @@ class TranslationApp:
                         self.root.after(0, lambda: self.settings_recraft_balance_label.config(text=f"{self._t('balance_label')}: {recraft_text}"))
                         self.root.after(0, lambda: self.chain_recraft_balance_label.config(text=f"{self._t('recraft_balance_label')}: {recraft_text}"))
                         self.root.after(0, lambda: self.rewrite_recraft_balance_label.config(text=f"{self._t('recraft_balance_label')}: {recraft_text}"))
+                        self.root.after(0, lambda: self.queue_recraft_balance_label.config(text=f"{self._t('recraft_balance_label')}: {recraft_text}"))
                     except RuntimeError:
                         # Ігноруємо помилки якщо головний цикл ще не готовий
                         pass

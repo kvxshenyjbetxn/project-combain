@@ -111,6 +111,9 @@ def create_rewrite_tab(notebook, app):
     app.rewrite_el_balance_label = ttk.Label(balance_frame, text=f"{app._t('elevenlabs_balance_label')}: N/A")
     app.rewrite_el_balance_label.pack(side='left', padx=(0,10))
 
+    app.rewrite_or_balance_label = ttk.Label(balance_frame, text=f"{app._t('openrouter_balance_label')}: N/A")
+    app.rewrite_or_balance_label.pack(side='left', padx=(0,10))
+
     app.rewrite_recraft_balance_label = ttk.Label(balance_frame, text=f"{app._t('recraft_balance_label')}: N/A")
     app.rewrite_recraft_balance_label.pack(side='left', padx=(0,10))
 

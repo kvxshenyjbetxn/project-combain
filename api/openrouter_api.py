@@ -45,6 +45,42 @@ class OpenRouterAPI:
         except requests.exceptions.RequestException as e:
             return False, f"Не вдалося підключитися: {e}"
 
+    def get_balance(self):
+        """Отримує баланс OpenRouter через /api/v1/key endpoint."""
+        if not self.api_key:
+            logger.warning("OpenRouter -> Ключ API не встановлено, неможливо отримати баланс.")
+            return None
+            
+        try:
+            url = f"{self.base_url}/key"
+            headers = {
+                "Authorization": f"Bearer {self.api_key}"
+            }
+            response = requests.get(url, headers=headers, timeout=10)
+            
+            if response.status_code == 200:
+                data = response.json().get('data', {})
+                limit = data.get('limit')
+                usage = data.get('usage', 0)
+                
+                if limit is None:
+                    # Немає ліміту, показуємо тільки використання
+                    balance_text = f"Usage: ${usage:.4f}"
+                    logger.info(f"OpenRouter -> Баланс оновлено: {balance_text}")
+                    return balance_text
+                else:
+                    # Є ліміт, показуємо залишок
+                    remaining = limit - usage
+                    balance_text = f"${remaining:.4f} left"
+                    logger.info(f"OpenRouter -> Баланс оновлено: {balance_text}")
+                    return balance_text
+            else:
+                logger.error(f"OpenRouter -> ПОМИЛКА: Не вдалося отримати баланс. Статус: {response.status_code}, Повідомлення: {response.text}")
+                return None
+        except requests.exceptions.RequestException as e:
+            logger.error(f"OpenRouter -> Помилка мережі при отриманні балансу: {e}")
+            return None
+
     def call_model(self, model, messages, params, task_description=""):
         if not self.api_key:
             logger.error("OpenRouter -> Ключ API не встановлено.")

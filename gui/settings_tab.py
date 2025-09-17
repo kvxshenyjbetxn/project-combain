@@ -66,7 +66,12 @@ def create_api_settings_subtabs(parent_tab, app):
     or_api_key_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=5)
     add_text_widget_bindings(app, or_api_key_entry)
     ttk.Button(or_frame, text=app._t('test_connection_button'), command=app.test_openrouter_connection, bootstyle="secondary-outline").grid(row=0, column=2, padx=5, pady=5)
+
+    app.settings_or_balance_label = ttk.Label(or_frame, text=f"{app._t('balance_label')}: N/A")
+    app.settings_or_balance_label.grid(row=1, column=0, columnspan=2, sticky='w', padx=5, pady=5)
     
+    ttk.Button(or_frame, text="🔄", command=app.reset_openrouter_balance, bootstyle="light-outline", width=3).grid(row=1, column=2, padx=5, pady=5)
+
     models_frame = ttk.Labelframe(or_scroll_frame, text=app._t('saved_models_label'), bootstyle="secondary")
     models_frame.pack(fill='x', padx=10, pady=5)
     models_frame.grid_columnconfigure(0, weight=1)
