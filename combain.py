@@ -554,21 +554,24 @@ class TranslationApp:
         self.root.bind_all("<Key>", self._on_key_release, "+")
 
     def _on_key_release(self, event):
-        ctrl = (event.state & 0x4) != 0
-        if event.keycode == 88 and ctrl and event.keysym.lower() != "x":
-            # event.widget.event_generate("<<Cut>>")
+        # Визначаємо, яка клавіша-модифікатор використовується в системі
+        # 0x4 - Control (Windows/Linux), 0x8 - Command (macOS)
+        if sys.platform == "darwin":  # darwin - це назва ядра macOS
+            modifier_pressed = (event.state & 0x8) != 0
+        else:
+            modifier_pressed = (event.state & 0x4) != 0
+
+        # Використовуємо єдину змінну для перевірки натискання модифікатора
+        if event.keycode == 88 and modifier_pressed and event.keysym.lower() != "x":
             self._handle_cut(event)
 
-        if event.keycode == 86 and ctrl and event.keysym.lower() != "v":
-            # event.widget.event_generate("<<Paste>>")
+        if event.keycode == 86 and modifier_pressed and event.keysym.lower() != "v":
             self._handle_paste(event)
 
-        if event.keycode == 67 and ctrl and event.keysym.lower() != "c":
-            # event.widget.event_generate("<<Copy>>")
+        if event.keycode == 67 and modifier_pressed and event.keysym.lower() != "c":
             self._handle_copy(event)
 
-        if event.keycode == 65 and ctrl and event.keysym.lower() != "a":
-            # event.widget.event_generate("<<SelectAll>>")
+        if event.keycode == 65 and modifier_pressed and event.keysym.lower() != "a":
             self._handle_select_all(event)
 
     def _handle_copy(self, event):
