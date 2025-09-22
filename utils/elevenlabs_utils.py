@@ -14,6 +14,7 @@ def update_elevenlabs_balance_labels(app_instance, new_balance):
     app_instance.root.after(0, lambda: app_instance.settings_el_balance_label.config(text=f"{app_instance._t('balance_label')}: {balance_text}"))
     app_instance.root.after(0, lambda: app_instance.chain_el_balance_label.config(text=f"{app_instance._t('elevenlabs_balance_label')}: {balance_text}"))
     app_instance.root.after(0, lambda: app_instance.rewrite_el_balance_label.config(text=f"{app_instance._t('elevenlabs_balance_label')}: {balance_text}"))
+    app_instance.root.after(0, lambda: app_instance.queue_el_balance_label.config(text=f"{app_instance._t('elevenlabs_balance_label')}: {balance_text}"))
     
     logger.info(f"Інтерфейс оновлено: баланс ElevenLabs тепер {balance_text}")
 
@@ -44,6 +45,7 @@ def update_elevenlabs_info(app_instance, update_templates=True):
         app_instance.root.after(0, lambda: app_instance.settings_el_balance_label.config(text=f"{app_instance._t('balance_label')}: {balance_text}"))
         app_instance.root.after(0, lambda: app_instance.chain_el_balance_label.config(text=f"{app_instance._t('elevenlabs_balance_label')}: {balance_text}"))
         app_instance.root.after(0, lambda: app_instance.rewrite_el_balance_label.config(text=f"{app_instance._t('elevenlabs_balance_label')}: {balance_text}"))
+        app_instance.root.after(0, lambda: app_instance.queue_el_balance_label.config(text=f"{app_instance._t('elevenlabs_balance_label')}: {balance_text}"))
     except RuntimeError:
         # Ігноруємо помилки якщо головний цикл ще не готовий
         pass

@@ -119,6 +119,10 @@ class WorkflowManager:
             self.app.root.after(0, lambda: messagebox.showerror(self.app._t('error_title'), self.app._t('error_unexpected_queue')))
         finally:
             self.app.is_processing_queue = False
+            self.app.current_processing_task_index = None  # Скидаємо поточне завдання
+            # Очищуємо прогрес відео після завершення обробки
+            with self.app.video_progress_lock:
+                self.app.video_chunk_progress.clear()
             self.app._update_button_states(is_processing=False, is_image_stuck=False)
             self.app.root.after(0, self.app.update_queue_display)
             if hasattr(self.app, 'pause_resume_button'):
@@ -307,11 +311,23 @@ class WorkflowManager:
 
     def _process_media_generation_phase(self, all_processing_data, queue_to_process):
         """Обробляє генерацію зображень та аудіо/субтитрів для всіх завдань паралельно"""
-        self.app.root.after(0, self.app.setup_empty_gallery, 'main', queue_to_process)
+        # Визначаємо тип галереї на основі завдань
+        has_rewrite = any(task.get('type') == 'Rewrite' for task in queue_to_process)
+        has_translate = any(task.get('type') == 'Translate' for task in queue_to_process)
+        
+        # Якщо є тільки рерайти, використовуємо галерею рерайту
+        # Якщо є тільки перекладі, використовуємо головну галерею  
+        # Якщо є змішані типи, використовуємо головну галерею (можна змінити пізніше)
+        if has_rewrite and not has_translate:
+            gallery_type = 'rewrite'
+        else:
+            gallery_type = 'main'
+            
+        self.app.root.after(0, self.app.setup_empty_gallery, gallery_type, queue_to_process)
         should_gen_images = any(data.get('text_results') and data['task']['steps'][key[1]].get('gen_images') for key, data in all_processing_data.items())
 
-        image_master_thread = threading.Thread(target=self._sequential_image_master, args=(all_processing_data, queue_to_process, 'main', False)) if should_gen_images else None
-        audio_subs_master_thread = threading.Thread(target=self._audio_subs_pipeline_master, args=(all_processing_data, False, 'main'))
+        image_master_thread = threading.Thread(target=self._sequential_image_master, args=(all_processing_data, queue_to_process, gallery_type, has_rewrite and not has_translate)) if should_gen_images else None
+        audio_subs_master_thread = threading.Thread(target=self._audio_subs_pipeline_master, args=(all_processing_data, has_rewrite and not has_translate, gallery_type))
         
         if image_master_thread: image_master_thread.start()
         audio_subs_master_thread.start()
@@ -334,6 +350,12 @@ class WorkflowManager:
                     self.app.total_individual_steps += 1  # final concatenation
 
         for task_key, data in sorted(self.all_processing_data.items()):
+            # Встановлюємо поточне завдання, що обробляється
+            task_index = task_key[0]
+            if self.app.current_processing_task_index != task_index:
+                self.app.current_processing_task_index = task_index
+                self.app.root.after(0, self.app.update_queue_display)  # Оновлюємо відображення статусу
+            
             if not self.app._check_app_state():
                 logger.warning("Монтаж зупинено користувачем.")
                 break
@@ -357,7 +379,7 @@ class WorkflowManager:
                 continue
 
             if status_key in self.app.task_completion_status:
-                self.app.task_completion_status[status_key]['steps'][self.app._t('step_name_create_video')] = "В процесі"
+                self.app.task_completion_status[status_key]['steps'][self.app._t('step_name_create_video')] = "0.0%"
                 self.app.root.after(0, self.app.update_task_status_display)
 
             image_chunks = np.array_split(all_images, len(data['audio_chunks']))
@@ -384,7 +406,7 @@ class WorkflowManager:
                 if self._concatenate_videos(self.app, video_chunk_paths, final_video_path):
                     self.app.increment_and_update_progress(queue_type)
                     if status_key in self.app.task_completion_status:
-                        self.app.task_completion_status[status_key]['steps'][self.app._t('step_name_create_video')] = "Готово"
+                        self.app.task_completion_status[status_key]['steps'][self.app._t('step_name_create_video')] = "100.0%"
                     if is_rewrite and 'original_filename' in data['task']:
                         self.app.save_processed_link(data['task']['original_filename'])
                 else:
@@ -396,6 +418,17 @@ class WorkflowManager:
             
             if self.config.get("telegram", {}).get("report_timing", "per_task") == "per_language":
                 self.app.send_task_completion_report(data['task'], single_lang_code=lang_code)
+
+        # Позначаємо завершені завдання
+        completed_tasks = set()
+        for task_key, data in self.all_processing_data.items():
+            task_index = task_key[0]
+            completed_tasks.add(task_index)
+        
+        # Додаємо завершені завдання до набору
+        self.app.completed_task_indices.update(completed_tasks)
+        self.app.current_processing_task_index = None  # Очищуємо поточне завдання
+        self.app.root.after(0, self.app.update_queue_display)  # Оновлюємо відображення статусу
 
         # Відправляємо звіти для завдань
         for task in queue_to_process:
@@ -623,7 +656,7 @@ class WorkflowManager:
                     continue
 
                 if status_key in self.app.task_completion_status:
-                    self.app.task_completion_status[status_key]['steps'][self.app._t('step_name_create_video')] = "В процесі"
+                    self.app.task_completion_status[status_key]['steps'][self.app._t('step_name_create_video')] = "0.0%"
                     self.app.root.after(0, self.app.update_task_status_display)
 
                 image_chunks = np.array_split(all_images, len(data['audio_chunks']))
@@ -650,7 +683,7 @@ class WorkflowManager:
                     if self._concatenate_videos(self.app, video_chunk_paths, final_video_path):
                         self.app.increment_and_update_progress(queue_type)
                         if status_key in self.app.task_completion_status:
-                            self.app.task_completion_status[status_key]['steps'][self.app._t('step_name_create_video')] = "Готово"
+                            self.app.task_completion_status[status_key]['steps'][self.app._t('step_name_create_video')] = "100.0%"
                         if is_rewrite and 'original_filename' in data['task']:
                             self.app.save_processed_link(data['task']['original_filename'])
                     else:
@@ -1084,7 +1117,7 @@ class WorkflowManager:
 
             if image_generated:
                 self.app.image_prompts_map[image_path] = prompt
-                self.app.root.after(0, self.app._add_image_to_gallery, image_path, task_key)
+                self.app.root.after(0, self.app._add_image_to_gallery, image_path, task_key, is_rewrite)
                 if self.firebase_api.is_initialized:
                     task_name = data['task'].get('task_name', f"Task {task_key[0]}")
                     def save_mapping(image_id, local_path):
@@ -1165,6 +1198,12 @@ class WorkflowManager:
                     self.app.task_completion_status[status_key]['total_subs'] = transcription_count
                     self.app.task_completion_status[status_key]['audio_generated'] = 0
                     self.app.task_completion_status[status_key]['subs_generated'] = 0
+                    
+                    # Встановлюємо початкові статуси як "0/X" 
+                    if len(text_chunks) > 0:
+                        self.app.task_completion_status[status_key]['steps'][self.app._t('step_name_audio')] = f"0/{len(text_chunks)}"
+                    if transcription_count > 0:
+                        self.app.task_completion_status[status_key]['steps'][self.app._t('step_name_create_subtitles')] = f"0/{transcription_count}"
                 
                 # Розділяємо на звичайні TTS та асинхронний Voicemaker
                 if tts_service == "voicemaker":
@@ -1220,6 +1259,11 @@ class WorkflowManager:
                     status_key = self._get_status_key(task_key_tuple[0], task_key_tuple[1], is_rewrite)
                     if status_key in self.app.task_completion_status:
                         self.app.task_completion_status[status_key]['audio_generated'] += 1
+                        # Оновлюємо проміжний статус
+                        total_audio = self.app.task_completion_status[status_key].get('total_audio', 0)
+                        done_audio = self.app.task_completion_status[status_key]['audio_generated']
+                        if total_audio > 0:
+                            self.app.task_completion_status[status_key]['steps'][self.app._t('step_name_audio')] = f"{done_audio}/{total_audio}"
                         self.app.root.after(0, self.app.update_task_status_display)
 
                     # Для НЕ-Voicemaker: одразу відправляємо на транскрипцію
@@ -1250,6 +1294,11 @@ class WorkflowManager:
                             status_key = self._get_status_key(task_key_tuple[0], task_key_tuple[1], is_rewrite)
                             if status_key in self.app.task_completion_status:
                                 self.app.task_completion_status[status_key]['audio_generated'] += 1
+                                # Оновлюємо проміжний статус для Voicemaker
+                                total_audio = self.app.task_completion_status[status_key].get('total_audio', 0)
+                                done_audio = self.app.task_completion_status[status_key]['audio_generated']
+                                if total_audio > 0:
+                                    self.app.task_completion_status[status_key]['steps'][self.app._t('step_name_audio')] = f"{done_audio}/{total_audio}"
                                 self.app.root.after(0, self.app.update_task_status_display)
                         
                         # Перевіряємо чи всі Voicemaker частини готові та чи не було обробки раніше
@@ -1281,6 +1330,11 @@ class WorkflowManager:
                         status_key = self._get_status_key(task_key_tuple[0], task_key_tuple[1], is_rewrite)
                         if status_key in self.app.task_completion_status:
                             self.app.task_completion_status[status_key]['subs_generated'] += 1
+                            # Оновлюємо проміжний статус субтитрів
+                            total_subs = self.app.task_completion_status[status_key].get('total_subs', 0)
+                            done_subs = self.app.task_completion_status[status_key]['subs_generated']
+                            if total_subs > 0:
+                                self.app.task_completion_status[status_key]['steps'][self.app._t('step_name_create_subtitles')] = f"{done_subs}/{total_subs}"
                             self.app.root.after(0, self.app.update_task_status_display)
                     else:
                         logger.warning(f"Транскрипція для {result_item.task_key} не створена (subs_path = None)")

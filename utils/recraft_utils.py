@@ -15,6 +15,7 @@ def update_recraft_balance_labels(app_instance, new_balance):
     app_instance.root.after(0, lambda: app_instance.settings_recraft_balance_label.config(text=f"{app_instance._t('balance_label')}: {balance_text}"))
     app_instance.root.after(0, lambda: app_instance.chain_recraft_balance_label.config(text=f"{app_instance._t('recraft_balance_label')}: {balance_text}"))
     app_instance.root.after(0, lambda: app_instance.rewrite_recraft_balance_label.config(text=f"{app_instance._t('recraft_balance_label')}: {balance_text}"))
+    app_instance.root.after(0, lambda: app_instance.queue_recraft_balance_label.config(text=f"{app_instance._t('recraft_balance_label')}: {balance_text}"))
     
     logger.info(f"Інтерфейс оновлено: баланс Recraft тепер {balance_text}")
 

@@ -8,6 +8,30 @@ from gui.gui_utils import CustomAskStringDialog
 
 logger = logging.getLogger(__name__)
 
+def update_openrouter_balance_labels(app_instance, new_balance):
+    """Update OpenRouter balance labels across all tabs in the GUI."""
+    balance_text = new_balance if new_balance is not None else 'N/A'
+    
+    # Update balance labels using the app instance's root and translation method
+    app_instance.root.after(0, lambda: app_instance.settings_or_balance_label.config(text=f"{app_instance._t('openrouter_balance_label')}: {balance_text}"))
+    app_instance.root.after(0, lambda: app_instance.chain_or_balance_label.config(text=f"{app_instance._t('openrouter_balance_label')}: {balance_text}"))
+    app_instance.root.after(0, lambda: app_instance.rewrite_or_balance_label.config(text=f"{app_instance._t('openrouter_balance_label')}: {balance_text}"))
+    app_instance.root.after(0, lambda: app_instance.queue_or_balance_label.config(text=f"{app_instance._t('openrouter_balance_label')}: {balance_text}"))
+    
+    logger.info(f"Інтерфейс оновлено: баланс OpenRouter тепер {balance_text}")
+
+def reset_openrouter_balance(app_instance):
+    """Reset OpenRouter balance by fetching fresh data from API."""
+    if not app_instance.or_api.api_key:
+        logger.warning("OpenRouter -> Ключ API не встановлено, неможливо скинути баланс.")
+        return
+    
+    # Отримуємо свіжий баланс
+    balance = app_instance.or_api.get_balance()
+    # Оновлюємо лейбли
+    update_openrouter_balance_labels(app_instance, balance)
+    logger.info("OpenRouter баланс скинуто та оновлено.")
+
 def test_openrouter_connection(app_instance):
     """Test OpenRouter API connection and display result."""
     api_key = app_instance.or_api_key_var.get()
@@ -16,7 +40,10 @@ def test_openrouter_connection(app_instance):
     temp_api = OpenRouterAPI(temp_config)
     success, message = temp_api.test_connection()
     if success:
-        messagebox.showinfo(app_instance._t('test_connection_title_or'), message)
+        # Якщо з'єднання успішне, отримуємо і оновлюємо баланс
+        balance = temp_api.get_balance()
+        update_openrouter_balance_labels(app_instance, balance)
+        messagebox.showinfo(app_instance._t('test_connection_title_or'), f"{message}\n{app_instance._t('balance_label')}: {balance if balance else 'N/A'}")
     else:
         messagebox.showerror(app_instance._t('test_connection_title_or'), message)
 

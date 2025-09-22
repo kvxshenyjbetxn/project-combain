@@ -61,6 +61,25 @@ def create_queue_tab(notebook, app):
     regenerate_alt_button.pack(side='left', padx=5)
     app.regenerate_alt_buttons.append(regenerate_alt_button)
 
+    # Фрейм з балансами API
+    balance_frame = ttk.Frame(top_controls_frame)
+    balance_frame.pack(anchor='w', padx=0, pady=5)
+
+    app.queue_el_balance_label = ttk.Label(balance_frame, text=f"{app._t('elevenlabs_balance_label')}: N/A")
+    app.queue_el_balance_label.pack(side='left', padx=(0,10))
+
+    app.queue_or_balance_label = ttk.Label(balance_frame, text=f"{app._t('openrouter_balance_label')}: N/A")
+    app.queue_or_balance_label.pack(side='left', padx=(0,10))
+
+    app.queue_recraft_balance_label = ttk.Label(balance_frame, text=f"{app._t('recraft_balance_label')}: N/A")
+    app.queue_recraft_balance_label.pack(side='left', padx=(0,10))
+
+    app.queue_vm_balance_label = ttk.Label(balance_frame, text=f"{app._t('voicemaker_balance_label')}: N/A")
+    app.queue_vm_balance_label.pack(side='left')
+
+    refresh_button = ttk.Button(balance_frame, text="↻", command=app.update_api_balances, bootstyle="light-outline", width=2)
+    refresh_button.pack(side='left', padx=5)
+
     # Основний фрейм для черги, який буде розширюватися
     queue_main_frame = ttk.Labelframe(app.queue_frame, text=app._t('task_queue_label'))
     queue_main_frame.pack(fill='both', expand=True, padx=10, pady=(0, 10), side='top')

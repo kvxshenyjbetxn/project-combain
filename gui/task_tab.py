@@ -160,6 +160,9 @@ def create_task_tab(notebook, app):
     app.chain_el_balance_label = ttk.Label(balance_frame, text=f"{app._t('elevenlabs_balance_label')}: N/A")
     app.chain_el_balance_label.pack(side='left', padx=(0,10))
 
+    app.chain_or_balance_label = ttk.Label(balance_frame, text=f"{app._t('openrouter_balance_label')}: N/A")
+    app.chain_or_balance_label.pack(side='left', padx=(0,10))
+
     app.chain_recraft_balance_label = ttk.Label(balance_frame, text=f"{app._t('recraft_balance_label')}: N/A")
     app.chain_recraft_balance_label.pack(side='left', padx=(0,10))
     

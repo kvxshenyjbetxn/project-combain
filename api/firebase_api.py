@@ -103,7 +103,7 @@ class FirebaseAPI:
                 refreshed_user = self.auth.refresh(saved_user_info['refreshToken'])
                 
                 # Логуємо структуру відповіді для діагностики
-                logger.info(f"Firebase -> Структура відповіді refresh(): {list(refreshed_user.keys()) if refreshed_user else 'None'}")
+                #logger.info(f"Firebase -> Структура відповіді refresh(): {list(refreshed_user.keys()) if refreshed_user else 'None'}")
                 
                 # Шукаємо user ID в різних можливих полях
                 user_id = None
@@ -123,7 +123,7 @@ class FirebaseAPI:
                     # Оновлюємо збережену інформацію
                     config['user_settings']['firebase_user'] = refreshed_user
                     save_config(config)
-                    logger.info(f"Firebase -> Успішно відновлено сесію для User ID: {user_id}")
+                    #logger.info(f"Firebase -> Успішно відновлено сесію для User ID: {user_id}")
                     return user_id
                 else:
                     logger.warning(f"Firebase -> Не знайдено User ID в відповіді refresh()")
@@ -200,7 +200,7 @@ class FirebaseAPI:
     def clear_logs(self):
         if not self.is_initialized or not self.user: return
         try:
-            logger.info("Firebase -> Очищення логів з бази даних...")
+            #logger.info("Firebase -> Очищення логів з бази даних...")
             self.db.child(self.logs_ref).remove(self.get_user_token())
             logger.info("Firebase -> Логи успішно очищено.")
         except Exception as e:
@@ -299,12 +299,12 @@ class FirebaseAPI:
             return
         try:
             # Видалення з Realtime Database
-            logger.info(f"Firebase -> Очищення посилань на зображення з бази даних для користувача {self.user_id}...")
+            #logger.info(f"Firebase -> Очищення посилань на зображення з бази даних для користувача {self.user_id}...")
             self.db.child(self.images_ref).remove(self.get_user_token())
             logger.info("Firebase -> Посилання на зображення видалено.")
 
             # Видалення файлів зі Storage
-            logger.info(f"Firebase -> Очищення файлів зображень зі Storage для користувача {self.user_id}...")
+            #logger.info(f"Firebase -> Очищення файлів зображень зі Storage для користувача {self.user_id}...")
             # Отримуємо список файлів для видалення
             storage_path = f"{self.user_id}/gallery_images/"
             try:
