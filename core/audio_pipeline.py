@@ -45,35 +45,34 @@ class VoicemakerAsyncHandler:
     def __init__(self, app_instance):
         self.app = app_instance
         self.vm_api = app_instance.vm_api
-        self.submitted_tasks: Dict[str, dict] = {}  # task_key -> {task_id, chunk_index, item}
-        self.completed_items: Dict[str, list] = {}  # task_key -> [completed AudioPipelineItems]
+        # Сховище для всіх завдань, що обробляються, згрупованих за task_key
+        self.task_groups: Dict[str, Dict[str, dict]] = {}  # task_key -> {vm_task_id -> task_info}
         self.submission_delay = 1.0  # 1 секунда між запитами
-        
+
     def submit_voicemaker_tasks(self, items: list) -> str:
         """
-        Відправляє всі Voicemaker завдання з затримкою в 1 секунду між запитами.
+        Відправляє всі Voicemaker завдання для ОДНОГО task_key з затримкою між запитами.
         Повертає task_key для групування.
         """
         if not items:
             return ""
             
-        # Всі items мають однаковий task_key
         task_key = items[0].task_key
-        self.submitted_tasks[task_key] = {}
-        self.completed_items[task_key] = []
+        self.task_groups[task_key] = {} # Ініціалізуємо групу для цього завдання
         
-        # Запускаємо відправку в окремому потоці
         thread = threading.Thread(target=self._submit_tasks_with_delay, args=(items, task_key), daemon=True)
         thread.start()
         
         logger.info(f"VoicemakerAsync -> Початок відправки {len(items)} завдань для {task_key}")
         return task_key
-        
+
     def _submit_tasks_with_delay(self, items: list, task_key: str):
         """Відправляє завдання з затримкою між запитами."""
         for i, item in enumerate(items):
+            if self.app.shutdown_event.is_set():
+                logger.warning(f"VoicemakerAsync -> Відправку завдань для {task_key} скасовано через закриття програми.")
+                break
             try:
-                # Відправляємо асинхронний запит
                 vm_task_id = self.vm_api.create_audio_task_async(
                     text=item.text_chunk,
                     voice_id=item.lang_config.get("voicemaker_voice_id"),
@@ -83,91 +82,64 @@ class VoicemakerAsyncHandler:
                 )
                 
                 if vm_task_id:
-                    self.submitted_tasks[task_key][vm_task_id] = {
-                        "chunk_index": item.chunk_index,
+                    self.task_groups[task_key][vm_task_id] = {
                         "item": item,
-                        "submitted_at": time.time()
+                        "status": "submitted"
                     }
-                    logger.info(f"VoicemakerAsync -> Відправлено {vm_task_id} для chunk {item.chunk_index}")
+                    logger.info(f"VoicemakerAsync -> Відправлено {vm_task_id} для chunk {item.chunk_index} (task_key: {task_key})")
                 else:
-                    logger.error(f"VoicemakerAsync -> Не вдалося створити завдання для chunk {item.chunk_index}")
-                
-                # Затримка між запитами (крім останнього)
+                    logger.error(f"VoicemakerAsync -> Не вдалося створити завдання для chunk {item.chunk_index} (task_key: {task_key})")
+                    self.task_groups[task_key][f"error_{item.chunk_index}"] = {"status": "error", "item": item}
+
                 if i < len(items) - 1:
                     time.sleep(self.submission_delay)
                     
             except Exception as e:
                 logger.exception(f"VoicemakerAsync -> Помилка відправки chunk {item.chunk_index}: {e}")
+                self.task_groups[task_key][f"error_{item.chunk_index}"] = {"status": "error", "item": item}
         
         logger.info(f"VoicemakerAsync -> Завершено відправку всіх завдань для {task_key}")
-    
+
     def check_and_download_ready_tasks(self, task_key: str) -> list:
         """
         Перевіряє готові завдання та завантажує їх.
         Повертає список успішно завантажених AudioPipelineItem.
         """
-        if task_key not in self.submitted_tasks:
+        if task_key not in self.task_groups:
             return []
             
         downloaded_items = []
-        tasks_info = self.submitted_tasks[task_key]
-        
-        # Отримуємо список готових завдань
-        ready_task_ids = self.vm_api.get_ready_tasks()
-        
-        for vm_task_id in ready_task_ids:
-            if vm_task_id in tasks_info:
-                task_info = tasks_info[vm_task_id]
+        tasks_to_check = list(self.task_groups[task_key].items()) # Копіюємо для безпечної ітерації
+
+        for vm_task_id, task_info in tasks_to_check:
+            if task_info["status"] == "submitted":
+                status_from_api = self.vm_api.get_task_status(vm_task_id)
+                if status_from_api == "ready":
+                    task_info["status"] = "ready"
+                elif status_from_api == "error":
+                    task_info["status"] = "error"
+            
+            if task_info["status"] == "ready":
                 item = task_info["item"]
-                
-                try:
-                    # Завантажуємо готовий файл
-                    success, remain_chars = self.vm_api.download_completed_task(vm_task_id, item.output_path)
-                    
-                    if success:
-                        downloaded_items.append(item)
-                        self.completed_items[task_key].append(item)
-                        
-                        # Видаляємо з submitted_tasks
-                        del tasks_info[vm_task_id]
-                        
-                        logger.info(f"VoicemakerAsync -> Завантажено chunk {item.chunk_index} для {task_key}")
-                    else:
-                        logger.error(f"VoicemakerAsync -> Не вдалося завантажити chunk {item.chunk_index}")
-                        
-                except Exception as e:
-                    logger.exception(f"VoicemakerAsync -> Помилка завантаження chunk {item.chunk_index}: {e}")
+                success, _ = self.vm_api.download_completed_task(vm_task_id, item.output_path)
+                if success:
+                    downloaded_items.append(item)
+                    task_info["status"] = "completed" # Позначаємо як завершене
+                    logger.info(f"VoicemakerAsync -> Завантажено chunk {item.chunk_index} для {task_key}")
+                else:
+                    task_info["status"] = "error"
+                    logger.error(f"VoicemakerAsync -> Не вдалося завантажити chunk {item.chunk_index}")
         
         return downloaded_items
     
-    def get_task_progress(self, task_key: str) -> dict:
-        """Повертає прогрес виконання завдань."""
-        if task_key not in self.submitted_tasks:
-            return {"submitted": 0, "completed": 0, "ready": 0, "pending": 0}
-            
-        tasks_info = self.submitted_tasks[task_key]
-        completed_count = len(self.completed_items.get(task_key, []))
-        
-        ready_count = 0
-        pending_count = 0
-        
-        for vm_task_id in tasks_info.keys():
-            status = self.vm_api.get_task_status(vm_task_id)
-            if status == "ready":
-                ready_count += 1
-            elif status == "pending":
-                pending_count += 1
-        
-        return {
-            "submitted": len(tasks_info) + completed_count,
-            "completed": completed_count,
-            "ready": ready_count,
-            "pending": pending_count
-        }
-    
     def is_task_group_completed(self, task_key: str, expected_total: int) -> bool:
-        """Перевіряє чи всі завдання в групі завершені."""
-        completed_count = len(self.completed_items.get(task_key, []))
+        """Перевіряє, чи всі завдання в групі завершені, порівнюючи з очікуваною кількістю."""
+        if task_key not in self.task_groups:
+            return False
+        
+        # Рахуємо тільки ті, що мають статус 'completed' або 'error'
+        completed_count = sum(1 for task in self.task_groups[task_key].values() if task["status"] in ["completed", "error"])
+        
         return completed_count >= expected_total
 
 class AudioWorkerPool:
@@ -226,21 +198,17 @@ class AudioWorkerPool:
     def add_transcription_task(self, item: TranscriptionPipelineItem):
         logger.info(f"Додання завдання транскрипції в чергу: {item.task_key} chunk {item.chunk_index}, audio_path: {item.audio_path}")
         self.transcription_queue.put(item)
-    
+
     def submit_voicemaker_tasks_async(self, items: list) -> str:
-        """Відправляє групу Voicemaker завдань асинхронно."""
+        """Проксі-метод для відправки Voicemaker завдань через обробник."""
         return self.voicemaker_handler.submit_voicemaker_tasks(items)
-    
-    def check_voicemaker_progress(self, task_key: str) -> list:
-        """Перевіряє та завантажує готові Voicemaker файли."""
+
+    def check_and_download_ready_tasks(self, task_key: str) -> list:
+        """Проксі-метод для перевірки та завантаження готових Voicemaker файлів."""
         return self.voicemaker_handler.check_and_download_ready_tasks(task_key)
-    
-    def get_voicemaker_progress(self, task_key: str) -> dict:
-        """Отримує прогрес виконання Voicemaker завдань."""
-        return self.voicemaker_handler.get_task_progress(task_key)
-    
+
     def is_voicemaker_group_completed(self, task_key: str, expected_total: int) -> bool:
-        """Перевіряє чи завершена група Voicemaker завдань."""
+        """Проксі-метод для перевірки, чи завершена група Voicemaker завдань."""
         return self.voicemaker_handler.is_task_group_completed(task_key, expected_total)
         
     def _audio_worker(self, worker_id: int):
