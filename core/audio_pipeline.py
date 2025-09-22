@@ -48,8 +48,7 @@ class VoicemakerAsyncHandler:
         self.submitted_tasks: Dict[str, dict] = {}  # task_key -> {task_id, chunk_index, item}
         self.completed_items: Dict[str, list] = {}  # task_key -> [completed AudioPipelineItems]
         self.submission_delay = 1.0  # 1 секунда між запитами
-        self.task_groups: Dict[str, set] = {} # task_key -> set of vm_task_ids
-
+        
     def submit_voicemaker_tasks(self, items: list) -> str:
         """
         Відправляє всі Voicemaker завдання з затримкою в 1 секунду між запитами.
@@ -57,20 +56,19 @@ class VoicemakerAsyncHandler:
         """
         if not items:
             return ""
-
+            
         # Всі items мають однаковий task_key
         task_key = items[0].task_key
         self.submitted_tasks[task_key] = {}
         self.completed_items[task_key] = []
-        self.task_groups[task_key] = set()
-
+        
         # Запускаємо відправку в окремому потоці
         thread = threading.Thread(target=self._submit_tasks_with_delay, args=(items, task_key), daemon=True)
         thread.start()
-
+        
         logger.info(f"VoicemakerAsync -> Початок відправки {len(items)} завдань для {task_key}")
         return task_key
-
+        
     def _submit_tasks_with_delay(self, items: list, task_key: str):
         """Відправляє завдання з затримкою між запитами."""
         for i, item in enumerate(items):
@@ -83,27 +81,26 @@ class VoicemakerAsyncHandler:
                     language_code=item.lang_code,
                     chunk_index=item.chunk_index
                 )
-
+                
                 if vm_task_id:
                     self.submitted_tasks[task_key][vm_task_id] = {
                         "chunk_index": item.chunk_index,
                         "item": item,
                         "submitted_at": time.time()
                     }
-                    self.task_groups[task_key].add(vm_task_id)
                     logger.info(f"VoicemakerAsync -> Відправлено {vm_task_id} для chunk {item.chunk_index}")
                 else:
                     logger.error(f"VoicemakerAsync -> Не вдалося створити завдання для chunk {item.chunk_index}")
-
+                
                 # Затримка між запитами (крім останнього)
                 if i < len(items) - 1:
                     time.sleep(self.submission_delay)
-
+                    
             except Exception as e:
                 logger.exception(f"VoicemakerAsync -> Помилка відправки chunk {item.chunk_index}: {e}")
-
+        
         logger.info(f"VoicemakerAsync -> Завершено відправку всіх завдань для {task_key}")
-
+    
     def check_and_download_ready_tasks(self, task_key: str) -> list:
         """
         Перевіряє готові завдання та завантажує їх.
@@ -111,36 +108,36 @@ class VoicemakerAsyncHandler:
         """
         if task_key not in self.submitted_tasks:
             return []
-
+            
         downloaded_items = []
         tasks_info = self.submitted_tasks[task_key]
-
+        
         # Отримуємо список готових завдань
         ready_task_ids = self.vm_api.get_ready_tasks()
-
+        
         for vm_task_id in ready_task_ids:
-            if vm_task_id in tasks_info and vm_task_id in self.task_groups.get(task_key, set()):
+            if vm_task_id in tasks_info:
                 task_info = tasks_info[vm_task_id]
                 item = task_info["item"]
-
+                
                 try:
                     # Завантажуємо готовий файл
                     success, remain_chars = self.vm_api.download_completed_task(vm_task_id, item.output_path)
-
+                    
                     if success:
                         downloaded_items.append(item)
                         self.completed_items[task_key].append(item)
-
+                        
                         # Видаляємо з submitted_tasks
                         del tasks_info[vm_task_id]
-
+                        
                         logger.info(f"VoicemakerAsync -> Завантажено chunk {item.chunk_index} для {task_key}")
                     else:
                         logger.error(f"VoicemakerAsync -> Не вдалося завантажити chunk {item.chunk_index}")
-
+                        
                 except Exception as e:
                     logger.exception(f"VoicemakerAsync -> Помилка завантаження chunk {item.chunk_index}: {e}")
-
+        
         return downloaded_items
     
     def get_task_progress(self, task_key: str) -> dict:
