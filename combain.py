@@ -1003,11 +1003,17 @@ class TranslationApp:
         self.image_control_active.clear()
         self.image_id_to_path_map.clear() # Очищуємо мапу на початку
 
-    def _add_image_to_gallery(self, image_path, task_key):
+    def _add_image_to_gallery(self, image_path, task_key, is_rewrite=False):
         container_info = self.gallery_lang_containers.get(task_key)
         if not container_info: return
 
         main_container = container_info['main_container']
+        
+        # Визначаємо правильний canvas на основі типу завдання
+        if is_rewrite:
+            active_canvas = self.rewrite_canvas
+        else:
+            active_canvas = self.chain_canvas
         
         # Dynamic layout system for gallery images
         try:
@@ -1017,7 +1023,7 @@ class TranslationApp:
             frame_width = temp_frame.winfo_reqwidth() + 200
             temp_frame.destroy()
             
-            container_width = self.active_gallery_canvas.winfo_width() - 20
+            container_width = active_canvas.winfo_width() - 20
 
             # Check if a new row is needed
             if container_info['current_width'] > 0 and (container_info['current_width'] + frame_width) > container_width:
@@ -1055,9 +1061,8 @@ class TranslationApp:
             container_info['current_width'] += single_image_frame.winfo_reqwidth() + 10
 
             # 6. Оновлюємо область прокрутки
-            if hasattr(self, 'active_gallery_canvas'):
-                canvas = self.active_gallery_canvas
-                canvas.config(scrollregion=canvas.bbox("all"))
+            canvas = active_canvas
+            canvas.config(scrollregion=canvas.bbox("all"))
 
         except Exception as e:
             logger.error(f"Could not load image {image_path}: {e}")
@@ -1350,6 +1355,7 @@ class TranslationApp:
     def update_progress_for_montage(self, message, task_key=None, chunk_index=None, progress=None):
         logger.info(f"[Montage Progress] {message}")
         if task_key and chunk_index is not None and progress is not None:
+            logger.debug(f"[Montage Progress] Updating task_key={task_key}, chunk={chunk_index}, progress={progress}")
             with self.video_progress_lock:
                 if task_key not in self.video_chunk_progress:
                     self.video_chunk_progress[task_key] = {}
@@ -1360,11 +1366,26 @@ class TranslationApp:
                 num_active_chunks = len(self.video_chunk_progress[task_key])
                 average_progress = total_progress / num_active_chunks if num_active_chunks > 0 else 0
                 
+                logger.debug(f"[Montage Progress] Average progress for {task_key}: {average_progress:.1f}%")
+                
                 # Оновлення статусу в task_completion_status
                 task_index, lang_code = task_key
-                status_key = f"{task_index}_{lang_code}"
+                # Перевіряємо чи це завдання рерайту (можна за назвою завдання або типом)
+                is_rewrite = False
+                if task_index < len(self.task_queue):
+                    is_rewrite = self.task_queue[task_index].get('type') == 'Rewrite'
+                
+                status_key_prefix = "rewrite_" if is_rewrite else ""
+                status_key = f"{status_key_prefix}{task_index}_{lang_code}"
+                
+                logger.debug(f"[Montage Progress] Using status_key: {status_key}, is_rewrite: {is_rewrite}")
+                
                 if status_key in self.task_completion_status:
                     self.task_completion_status[status_key]['video_progress'] = average_progress
+                    # Статус буде оновлений через періодичний update (кожні 5 секунд)
+                    # Не викликаємо update_task_status_display тут для уникнення частих оновлень
+                else:
+                    logger.warning(f"[Montage Progress] Status key {status_key} not found in task_completion_status")
 
 # Test connection methods
     def test_openrouter_connection(self):
@@ -2577,6 +2598,17 @@ class TranslationApp:
     def _update_video_progress_display_periodic(self):
         """Оновлює відображення черг, якщо вони в процесі обробки."""
         if self.is_processing_queue:
+            # Перевіряємо чи є активні відео що монтуються
+            has_active_video = False
+            active_tasks = []
+            with self.video_progress_lock:
+                if self.video_chunk_progress:
+                    has_active_video = True
+                    active_tasks = list(self.video_chunk_progress.keys())
+            
+            if has_active_video:
+                logger.debug(f"Періодичне оновлення прогресу відео. Активні завдання: {active_tasks}")
+            
             self.update_queue_display()
 
     def _get_unified_step_status(self, task_index, lang_code, step_key, task_type):
@@ -2628,21 +2660,22 @@ class TranslationApp:
             return f"{done}/{total}" if total > 0 else status
         
         elif step_key == 'create_video':
-            if status == "В процесі":
-                with self.video_progress_lock:
-                    task_key_tuple = (task_index, lang_code)
-                    progress_dict = self.video_chunk_progress.get(task_key_tuple, {})
+            # Якщо статус завершений, повертаємо 100%
+            if status in ["Готово", "100.0%"]:
+                return "100.0%"
+            
+            # Перевіряємо поточний прогрес з video_chunk_progress як резервний варіант
+            task_key_tuple = (task_index, lang_code)
+            with self.video_progress_lock:
+                if task_key_tuple in self.video_chunk_progress:
+                    progress_dict = self.video_chunk_progress[task_key_tuple]
                     if progress_dict:
                         valid_progress_values = [v for v in progress_dict.values() if isinstance(v, (int, float))]
                         if valid_progress_values:
                             avg_progress = sum(valid_progress_values) / len(valid_progress_values)
                             return f"{avg_progress:.1f}%"
-                        else:
-                            return "0.0%"
-                    else:
-                        return "0.0%"
-            elif status == "Готово":
-                return "100.0%" # Залишаємо 100% після завершення
+            
+            # Якщо немає прогресу в video_chunk_progress, повертаємо статус як є
             return status
 
         # Для всіх інших кроків просто повертаємо їх текстовий статус
