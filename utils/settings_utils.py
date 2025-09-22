@@ -129,7 +129,6 @@ def save_settings(app_instance):
     app.config['montage']['zoom_speed'] = app.montage_zoom_speed_var.get()
     app.config['montage']['transition_effect'] = app.montage_transition_var.get()
     app.config['montage']['font_size'] = app.montage_font_size_var.get()
-    app.config['montage']['font_style'] = app.montage_font_style_var.get()
     app.config['montage']['output_framerate'] = app.montage_output_framerate_var.get()
     
     # Codec settings

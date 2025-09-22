@@ -564,18 +564,9 @@ def create_montage_settings_tab(parent_tab, app):
     font_size_spinbox.grid(row=6, column=1, sticky='w', padx=5, pady=2)
     add_text_widget_bindings(app, font_size_spinbox)
 
-    app.montage_font_style_var = tk.StringVar(value=montage_cfg.get('font_style'))
-    font_style = ["Arial", "Impact", "Book Antiqua", "Segoe Print"]
-    font_style_combo = ttk.Combobox(montage_frame, textvariable=app.montage_font_style_var, values=font_style,
-                                    state="readonly")
-    font_style_combo.grid(row=7, column=1, sticky='ew', padx=5, pady=2)
-    add_text_widget_bindings(app, font_style_combo)
-    ttk.Label(montage_frame, text=app._t('font_style_label')).grid(row=7, column=0, sticky='w', padx=5, pady=2)
-
     codec_cfg = montage_cfg.get('codec', {})
     codec_frame = ttk.Labelframe(scrollable_frame, text=app._t('montage_codec_settings_label'))
     codec_frame.pack(fill='x', padx=10, pady=5)
-
     
     if sys.platform == "darwin":
         app.codec_options = {
