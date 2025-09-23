@@ -1296,17 +1296,23 @@ class WorkflowManager:
                     self.app.increment_and_update_progress(queue_type)
                     task_key_tuple = eval(result.item.task_key)
                     status_key = self._get_status_key(task_key_tuple[0], task_key_tuple[1], is_rewrite)
+                    
+                    # Отримуємо 'info' для поточного завдання
+                    info = tasks_info.get(result.item.task_key)
+                    if not info:
+                        logger.warning(f"Не знайдено інформацію для завдання {result.item.task_key}")
+                        continue
+
                     if status_key in self.app.task_completion_status:
                         status_data = self.app.task_completion_status[status_key]
                         status_data['audio_generated'] += 1
                         if status_data['total_audio'] > 0: status_data['steps'][self.app._t('step_name_audio')] = f"{status_data['audio_generated']}/{status_data['total_audio']}"
                         self.app.root.after(0, self.app.update_task_status_display)
                     
-                    if info['data']['task']['steps'][eval(task_key)[1]].get('create_subtitles'):
+                    if info['data']['task']['steps'][task_key_tuple[1]].get('create_subtitles'):
                         trans_item = TranscriptionPipelineItem(result.item.output_path, os.path.dirname(result.item.output_path), result.item.chunk_index, result.item.lang_code, result.item.task_key)
                         self.audio_worker_pool.add_transcription_task(trans_item)
                     else: # Якщо транскрипція не потрібна, все одно додаємо аудіо
-                        info = tasks_info[result.item.task_key]
                         if 'audio_chunks' not in info['data']: info['data']['audio_chunks'] = []
                         info['data']['audio_chunks'].append(result.item.output_path)
 
