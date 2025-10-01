@@ -20,8 +20,12 @@ class FirebaseAPI:
         self.user = None
         self.user_id = None
         
+        firebase_config = config.get("firebase", {})
+        if not firebase_config.get("enabled", True):
+            logger.info("Firebase -> Інтеграція вимкнена в конфігурації.")
+            return
+
         try:
-            firebase_config = config.get("firebase", {})
             db_url = firebase_config.get("database_url")
             storage_bucket = firebase_config.get("storage_bucket")
 
@@ -170,7 +174,7 @@ class FirebaseAPI:
         return self.user.get('idToken') or self.user.get('id_token') or self.user.get('token')
 
     def send_log(self, message, is_retry=False):
-        if not self.is_initialized or not self.user: return
+        if not self.is_initialized: return
         try:
             timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
             token = self.get_user_token()

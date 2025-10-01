@@ -99,6 +99,11 @@ def save_settings(app_instance):
     if 'telegram' not in app.config: 
         app.config['telegram'] = {}
     app.config['telegram']['enabled'] = app.tg_enabled_var.get()
+    
+    # Firebase settings
+    if 'firebase' not in app.config:
+        app.config['firebase'] = {}
+    app.config['firebase']['enabled'] = app.firebase_enabled_var.get()
     app.config['telegram']['api_key'] = app.tg_api_key_var.get()
     app.config['telegram']['chat_id'] = app.tg_chat_id_var.get()
 

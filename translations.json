@@ -322,7 +322,8 @@
         "add_task_title": "Введіть назву завдання",
         "add_task_prompt": "Назва завдання:",
         "task_type_column": "Тип завдання",
-        "info_no_new_files_or_links": "Нових файлів чи посилань для обробки не знайдено."
+        "info_no_new_files_or_links": "Нових файлів чи посилань для обробки не знайдено.",
+        "enable_firebase_label": "Увімкнути інтеграцію з Firebase"
     },
     "en": {
         "api_tab_label": "API",
@@ -645,6 +646,7 @@
         "add_task_title": "Enter Task Name",
         "add_task_prompt": "Task name:",
         "task_type_column": "Task Type",
-        "info_no_new_files_or_links": "No new files or links to process were found."
+        "info_no_new_files_or_links": "No new files or links to process were found.",
+        "enable_firebase_label": "Enable Firebase Integration"
     }
 }

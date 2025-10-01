@@ -69,6 +69,7 @@ DEFAULT_CONFIG = {
         }
     },
     "firebase": {
+        "enabled": True,
         "database_url": "https://projectcombain-default-rtdb.europe-west1.firebasedatabase.app",
         "storage_bucket": "gs://projectcombain.firebasestorage.app",
         "auto_clear_gallery": True,

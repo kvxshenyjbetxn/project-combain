@@ -259,12 +259,12 @@ class TranslationApp:
             self.refresh_user_stats()
         
         # Clear old gallery images on startup if auto-clear is enabled
-        if self.firebase_api.is_initialized and self.config.get("firebase", {}).get("auto_clear_gallery", True):
+        if self.firebase_api and self.firebase_api.is_initialized and self.config.get("firebase", {}).get("auto_clear_gallery", True):
             self.firebase_api.clear_images()
             #logger.info("Auto-cleared old gallery images from Firebase on application startup")
             
         # Clear montage ready status on startup
-        if self.firebase_api.is_initialized:
+        if self.firebase_api and self.firebase_api.is_initialized:
             self.firebase_api.clear_montage_ready_status()
             #logger.info("Cleared montage ready status on application startup")
             

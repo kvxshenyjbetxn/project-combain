@@ -262,6 +262,10 @@ def create_firebase_settings_tab(parent_tab, app):
                            font=('TkDefaultFont', 9),
                            foreground='gray')
     instructions.grid(row=1, column=0, columnspan=3, sticky='w', padx=5, pady=(10, 5))
+
+    # Чекбокс для ввімкнення/вимкнення Firebase
+    app.firebase_enabled_var = tk.BooleanVar(value=app.config.get("firebase", {}).get("enabled", True))
+    ttk.Checkbutton(firebase_frame, variable=app.firebase_enabled_var, text=app._t('enable_firebase_label'), bootstyle="light-round-toggle").grid(row=2, column=0, columnspan=3, sticky='w', padx=5, pady=5)
     
     # Статистика
     stats_frame = ttk.Labelframe(firebase_scroll_frame, text=app._t('statistics_label'))
