@@ -12,6 +12,7 @@ logger = logging.getLogger("TranslationApp")
 
 class FirebaseAPI:
     def __init__(self, config):
+        self.config = config  # Зберігаємо конфігурацію
         self.is_initialized = False
         self.auth = None
         self.db = None
@@ -19,8 +20,12 @@ class FirebaseAPI:
         self.user = None
         self.user_id = None
         
+        firebase_config = config.get("firebase", {})
+        if not firebase_config.get("enabled", True):
+            logger.info("Firebase -> Інтеграція вимкнена в конфігурації.")
+            return
+
         try:
-            firebase_config = config.get("firebase", {})
             db_url = firebase_config.get("database_url")
             storage_bucket = firebase_config.get("storage_bucket")
 
@@ -62,11 +67,33 @@ class FirebaseAPI:
             self.images_ref = f'{self.base_path}/images'
             self.commands_ref = f'{self.base_path}/commands'
             self.is_initialized = True
+            
+            # Перевіряємо доступність Firebase Storage
+            self._test_storage_connectivity()
+            
             logger.info(f"Firebase -> API успішно ініціалізовано для користувача: {self.user_id}")
 
         except Exception as e:
             logger.error(f"Firebase -> КРИТИЧНА ПОМИЛКА ініціалізації: {e}", exc_info=True)
             self.is_initialized = False
+
+    def _test_storage_connectivity(self):
+        """Тестує з'єднання з Firebase Storage."""
+        try:
+            # Спробуємо отримати список файлів (це не створює файлів)
+            test_path = f"{self.user_id}/test/"
+            self.storage.child(test_path).get_url(None)
+        except Exception as e:
+            error_msg = str(e)
+            if "404" in error_msg or "Not Found" in error_msg:
+                logger.warning("Firebase Storage -> Bucket може не існувати або бути недоступним")
+                logger.warning("Firebase Storage -> Буде використовуватися fallback на локальні файли")
+            elif "403" in error_msg:
+                logger.warning("Firebase Storage -> Проблеми з правами доступу")
+            else:
+                logger.warning(f"Firebase Storage -> Тест з'єднання: {error_msg}")
+            return False
+        return True
 
     def _get_or_create_user(self, config):
         """Отримує або створює анонімного користувача Firebase."""
@@ -80,7 +107,7 @@ class FirebaseAPI:
                 refreshed_user = self.auth.refresh(saved_user_info['refreshToken'])
                 
                 # Логуємо структуру відповіді для діагностики
-                logger.info(f"Firebase -> Структура відповіді refresh(): {list(refreshed_user.keys()) if refreshed_user else 'None'}")
+                #logger.info(f"Firebase -> Структура відповіді refresh(): {list(refreshed_user.keys()) if refreshed_user else 'None'}")
                 
                 # Шукаємо user ID в різних можливих полях
                 user_id = None
@@ -100,7 +127,7 @@ class FirebaseAPI:
                     # Оновлюємо збережену інформацію
                     config['user_settings']['firebase_user'] = refreshed_user
                     save_config(config)
-                    logger.info(f"Firebase -> Успішно відновлено сесію для User ID: {user_id}")
+                    #logger.info(f"Firebase -> Успішно відновлено сесію для User ID: {user_id}")
                     return user_id
                 else:
                     logger.warning(f"Firebase -> Не знайдено User ID в відповіді refresh()")
@@ -146,8 +173,8 @@ class FirebaseAPI:
             return None
         return self.user.get('idToken') or self.user.get('id_token') or self.user.get('token')
 
-    def send_log(self, message):
-        if not self.is_initialized or not self.user: return
+    def send_log(self, message, is_retry=False):
+        if not self.is_initialized: return
         try:
             timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
             token = self.get_user_token()
@@ -155,9 +182,19 @@ class FirebaseAPI:
                 logger.error("Firebase -> Не знайдено токен для аутентифікації")
                 return
             self.db.child(self.logs_ref).push({'timestamp': timestamp, 'message': message}, token)
-            logger.debug(f"Firebase -> Лог успішно надіслано: {message}")
+            # Видалено технічне повідомлення, яке створювало цикл логування
         except Exception as e:
-            logger.error(f"Firebase -> Помилка надсилання логу: {e}")
+            error_str = str(e)
+            # Перевіряємо помилку 401 та уникаємо нескінченних рекурсій
+            if "401" in error_str and "Unauthorized" in error_str and not is_retry:
+                logger.warning("Firebase -> Токен застарів. Спроба оновлення...")
+                if self.refresh_user_token():
+                    logger.info("Firebase -> Токен успішно оновлено. Повторна відправка логу...")
+                    self.send_log(message, is_retry=True) # Повторна спроба
+                else:
+                    logger.error(f"Firebase -> Не вдалося оновити токен. Помилка надсилання логу: {e}")
+            else:
+                logger.error(f"Firebase -> Помилка надсилання логу: {e}")
 
     def send_log_in_thread(self, message):
         if not self.is_initialized: return
@@ -167,24 +204,65 @@ class FirebaseAPI:
     def clear_logs(self):
         if not self.is_initialized or not self.user: return
         try:
-            logger.info("Firebase -> Очищення логів з бази даних...")
+            #logger.info("Firebase -> Очищення логів з бази даних...")
             self.db.child(self.logs_ref).remove(self.get_user_token())
             logger.info("Firebase -> Логи успішно очищено.")
         except Exception as e:
             logger.error(f"Firebase -> Не вдалося очистити логи: {e}")
 
     def upload_image_and_get_url(self, local_path, remote_path):
+        # Перевіряємо, чи увімкнено завантаження в Storage
+        firebase_config = getattr(self, 'config', {}).get('firebase', {})
+        storage_enabled = firebase_config.get('enable_storage_upload', True)
+        
+        if not storage_enabled:
+            logger.debug("Firebase Storage -> Завантаження вимкнено в конфігурації. Використовуємо локальний шлях.")
+            return f"file://{local_path.replace(os.sep, '/')}"
+            
         if not self.is_initialized or not self.user:
-            logger.error("Firebase Storage не ініціалізовано.")
-            return None
+            logger.warning("Firebase Storage не ініціалізовано. Використовуємо локальний шлях.")
+            return f"file://{local_path.replace(os.sep, '/')}"
+            
         try:
+            # Перевіряємо, чи існує файл локально
+            if not os.path.exists(local_path):
+                logger.error(f"Firebase -> Локальний файл не існує: {local_path}")
+                return None
+                
             # Додаємо user_id до шляху Storage
             user_remote_path = f"{self.user_id}/{remote_path}"
+            logger.debug(f"Firebase -> Спроба завантажити {local_path} → {user_remote_path}")
+            
+            # Перевіряємо розмір файлу
+            file_size = os.path.getsize(local_path)
+            if file_size > 10 * 1024 * 1024:  # 10MB
+                logger.warning(f"Firebase -> Файл занадто великий ({file_size} bytes). Використовуємо локальний шлях.")
+                return f"file://{local_path.replace(os.sep, '/')}"
+            
+            # Спробуємо завантажити файл з timeout
+            logger.debug(f"Firebase -> Початок завантаження файлу {file_size} bytes")
             blob = self.storage.child(user_remote_path).put(local_path, self.get_user_token())
-            return self.storage.child(user_remote_path).get_url(blob['downloadTokens'])
+            
+            # Отримуємо URL
+            download_url = self.storage.child(user_remote_path).get_url(blob['downloadTokens'])
+            logger.info(f"Firebase -> ✅ Успішно завантажено: {os.path.basename(local_path)}")
+            return download_url
+            
         except Exception as e:
-            logger.error(f"Firebase -> Помилка завантаження зображення '{local_path}': {e}", exc_info=True)
-            return None
+            error_msg = str(e)
+            logger.warning(f"Firebase -> Помилка завантаження '{os.path.basename(local_path)}': {error_msg}")
+            
+            # Детальний аналіз помилки
+            if "404" in error_msg:
+                logger.warning("Firebase -> 404 помилка: Storage bucket може не існувати або бути недоступним")
+            elif "403" in error_msg:
+                logger.warning("Firebase -> 403 помилка: Проблеми з правами доступу або токеном")
+            elif "401" in error_msg:
+                logger.warning("Firebase -> 401 помилка: Проблеми з аутентифікацією")
+            
+            # Fallback на локальний файл
+            logger.info(f"Firebase -> 🔄 Fallback: використовуємо локальний шлях для {os.path.basename(local_path)}")
+            return f"file://{local_path.replace(os.sep, '/')}"
 
     def add_image_to_db(self, image_id, image_url, task_name, lang_code, prompt):
         if not self.is_initialized or not self.user: return
@@ -225,12 +303,12 @@ class FirebaseAPI:
             return
         try:
             # Видалення з Realtime Database
-            logger.info(f"Firebase -> Очищення посилань на зображення з бази даних для користувача {self.user_id}...")
+            #logger.info(f"Firebase -> Очищення посилань на зображення з бази даних для користувача {self.user_id}...")
             self.db.child(self.images_ref).remove(self.get_user_token())
             logger.info("Firebase -> Посилання на зображення видалено.")
 
             # Видалення файлів зі Storage
-            logger.info(f"Firebase -> Очищення файлів зображень зі Storage для користувача {self.user_id}...")
+            #logger.info(f"Firebase -> Очищення файлів зображень зі Storage для користувача {self.user_id}...")
             # Отримуємо список файлів для видалення
             storage_path = f"{self.user_id}/gallery_images/"
             try:

@@ -36,7 +36,7 @@ def create_context_menu(app, event):
 
 
 def create_scrollable_tab(app, parent_tab):
-    """Create a scrollable tab with dynamic theming."""
+    """Create a scrollable tab with dynamic theming and smart scrolling."""
     theme_name = app.root.style.theme_use()
     if theme_name == 'cyborg': 
         canvas_bg = "#060606"
@@ -53,22 +53,54 @@ def create_scrollable_tab(app, parent_tab):
     frame_id = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
 
     def configure_canvas(event):
-        # ВИПРАВЛЕНО: Прибираємо умову і завжди розтягуємо внутрішній фрейм
-        # на всю ширину канвасу. Це робить поведінку стабільною.
+        # Розтягуємо внутрішній фрейм на всю ширину канвасу
         canvas.itemconfig(frame_id, width=event.width)
-        canvas.configure(scrollregion=canvas.bbox("all"))
+        update_scroll_region()
 
     def configure_scrollable_frame(event):
         # Оновлюємо скролрегіон, коли змінюється розмір контенту
+        update_scroll_region()
+        
+    def update_scroll_region():
+        # Оновлюємо регіон прокрутки
+        canvas.update_idletasks()
         canvas.configure(scrollregion=canvas.bbox("all"))
+        
+        # Перевіряємо чи потрібен скролбар
+        canvas_height = canvas.winfo_height()
+        content_height = scrollable_frame.winfo_reqheight()
+        
+        if content_height > canvas_height and canvas_height > 1:
+            # Контент не поміщається - показуємо скролбар
+            if not scrollbar.winfo_ismapped():
+                scrollbar.pack(side="right", fill="y")
+        else:
+            # Контент поміщається - ховаємо скролбар і скидаємо прокрутку
+            if scrollbar.winfo_ismapped():
+                scrollbar.pack_forget()
+            # Скидаємо позицію прокрутки вгору
+            canvas.yview_moveto(0)
 
     canvas.bind('<Configure>', configure_canvas)
     scrollable_frame.bind('<Configure>', configure_scrollable_frame)
     
     canvas.configure(yscrollcommand=scrollbar.set)
     canvas.pack(side="left", fill="both", expand=True)
-    scrollbar.pack(side="right", fill="y")
+    
+    # Початково не показуємо скролбар
+    # scrollbar.pack(side="right", fill="y")  # Видаляємо це
+    
     app.scrollable_canvases.append(canvas)
+    
+    # Додаємо функцію для примусового оновлення
+    def force_update_scroll():
+        canvas.after(100, update_scroll_region)
+    
+    # Зберігаємо функцію в app для можливості викликати її ззовні
+    if not hasattr(app, 'update_scroll_functions'):
+        app.update_scroll_functions = []
+    app.update_scroll_functions.append(force_update_scroll)
+    
     return canvas, scrollable_frame
 
 
@@ -231,7 +263,7 @@ class AdvancedRegenerateDialog(tk.Toplevel):
         # API Service Selector
         ttk.Label(master, text=self.app._t('service_label')).grid(row=1, column=0, sticky='w', padx=5, pady=5)
         self.api_var = tk.StringVar(value=self.app.config.get("ui_settings", {}).get("image_generation_api", "pollinations"))
-        api_combo = ttk.Combobox(master, textvariable=self.api_var, values=["pollinations", "recraft"], state="readonly")
+        api_combo = ttk.Combobox(master, textvariable=self.api_var, values=["pollinations", "recraft", "googler"], state="readonly")
         api_combo.grid(row=1, column=1, sticky="ew", padx=5, pady=5)
         api_combo.bind("<<ComboboxSelected>>", self.update_model_options)
 
@@ -263,6 +295,11 @@ class AdvancedRegenerateDialog(tk.Toplevel):
             self.recraft_style_var = tk.StringVar(value=self.app.config["recraft"]["style"])
             recraft_style_combo = ttk.Combobox(self.model_frame, textvariable=self.recraft_style_var, values=["realistic_image", "digital_illustration", "vector_illustration", "icon", "logo_raster"], state="readonly")
             recraft_style_combo.grid(row=1, column=1, sticky='ew', padx=5, pady=2)
+        elif service == "googler":
+            ttk.Label(self.model_frame, text="Aspect Ratio:").grid(row=0, column=0, sticky='w', padx=5, pady=2)
+            self.googler_aspect_var = tk.StringVar(value=self.app.config.get("googler", {}).get("aspect_ratio", "IMAGE_ASPECT_RATIO_LANDSCAPE"))
+            googler_aspect_combo = ttk.Combobox(self.model_frame, textvariable=self.googler_aspect_var, values=["IMAGE_ASPECT_RATIO_LANDSCAPE", "IMAGE_ASPECT_RATIO_PORTRAIT", "IMAGE_ASPECT_RATIO_SQUARE"], state="readonly")
+            googler_aspect_combo.grid(row=0, column=1, sticky='ew', padx=5, pady=2)
 
     def buttonbox(self):
         box = ttk.Frame(self)
@@ -284,6 +321,8 @@ class AdvancedRegenerateDialog(tk.Toplevel):
         elif self.result["service"] == "recraft":
             self.result["model"] = self.recraft_model_var.get()
             self.result["style"] = self.recraft_style_var.get()
+        elif self.result["service"] == "googler":
+            self.result["aspect_ratio"] = self.googler_aspect_var.get()
         self.destroy()
 
     def cancel(self, event=None):

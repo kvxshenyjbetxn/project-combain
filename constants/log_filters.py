@@ -27,7 +27,9 @@ TECHNICAL_MESSAGES = [
     "Video concatenation successful.",
     "Firebase -> Структура відповіді refresh(): ['userId', 'idToken', 'refreshToken']",
     "Found system-wide ffmpeg in PATH.",
-    "Firebase -> Помилка очищення Storage: 'Storage' object has no attribute 'bucket'"
+    "Firebase -> Помилка очищення Storage: 'Storage' object has no attribute 'bucket'",
+    "Speechify -> Тест успішний. Отримано JSON з ключем audio_data",
+    "Speechify -> Тестовий запит: відправка перевіреного українського пейлоаду на https://api.sws.speechify.com/v1/audio/speech"
 ]
 
 # Префікси повідомлень, які фільтруються з GUI
@@ -46,13 +48,53 @@ TECHNICAL_MESSAGE_PREFIXES = [
     "Firebase -> Очищення посилань на зображення з бази даних для користувача",
     "Firebase -> Очищення файлів зображень зі Storage для користувача",
     "Firebase -> Успішно відновлено сесію для User ID:",
-    "Firebase -> Очищення логів для користувача"
+    "Firebase -> Очищення логів для користувача",
+    "Firebase -> API успішно ініціалізовано для користувача:"
 ]
 
 # Додаткові префікси повідомлень, які не відправляються в Firebase (мобільний додаток), 
 # але показуються в десктопному GUI
 FIREBASE_FILTER_PREFIXES = [
-    "Прогрес:",  # Детальний прогрес монтажу відео (FPS, бітрейт, тощо)
+    "Прогрес:",
+    "Firebase -> Додано посилання на зображення в базу даних:",
+    "Firebase -> Оновлено посилання на зображення в базі даних:",
+    "Firebase -> Видалено зображення з бази даних:",
+    "Firebase -> Видалено зображення зі Storage:",
+    "Firebase -> Зображення видалено зі Storage:",
+    "Firebase -> Лог успішно надіслано:",
+    "Збережено мапування:",
+    "Whisper -> Запит на завантаження моделі:",
+    "[Montage Progress] Генерація .ass для",
+    "Субтитри -> Початок транскрибації файлу:",
+    "Firebase -> Обробка команди з черги:",
+    "Firebase -> Очищення посилань на зображення з бази даних для користувача",
+    "Firebase -> Очищення файлів зображень зі Storage для користувача",
+    "Firebase -> Успішно відновлено сесію для User ID:",
+    "Firebase -> Очищення логів для користувача",
+    "Firebase -> API успішно ініціалізовано для користувача:",
+    "Hybrid mode -> Phase 1: Parallel text processing for 1 tasks.",
+    "Детальний підрахунок прогресу: знайдено 14 індивідуальних етапів.",
+    "OpenRouter -> УСПІХ: Отримано відповідь від моделі 'google/gemini-2.5-flash'.",
+    "[Image Control] Image Master Thread: Starting sequential image generation.",
+    "Гібридний режим -> Етап 2: Одночасна генерація медіа.",
+    "Starting generation of 20 images for RO using Pollinations.",
+    "Всього відправлено на озвучку: 3 фрагментів.",
+    "Pollinations -> Генерація зображення",
+    "Pollinations -> Відправка запиту на генерацію зображення. Промпт:",
+    "AudioWorkerPool запущено з 3 аудіо-воркерами та 1 воркером транскрипції.",
+    "[Audio/Subs Master] Запуск керованого пайплайну.",
+    "Pollinations -> УСПІХ: Зображення збережено в",
+    "Гібридний режим -> Етап 1: Обробку тексту завершено.",
+    "TranscriptionWorker: Початок",
+    "Whisper -> УСПІХ: Модель 'base' успішно завантажена.",
+    "Очікується 3 результатів транскрипції.",
+    "[Image Control] Image Master Thread: All image generation tasks complete.",
+    "Детальний підрахунок прогресу для",
+    "Hybrid mode -> Phase 1:",
+    "Hybrid mode -> Phase 0: Downloading and transcription.",
+    "Firebase -> ✅ Успішно завантажено:"
+    
+    
 ]
 
 def is_technical_message(message):

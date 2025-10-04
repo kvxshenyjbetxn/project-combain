@@ -8,6 +8,7 @@ from api.montage_api import MontageAPI
 from api.openrouter_api import OpenRouterAPI
 from api.pollinations_api import PollinationsAPI
 from api.recraft_api import RecraftAPI
+from api.googler_api import GooglerAPI
 from api.telegram_api import TelegramAPI
 from api.voicemaker_api import VoiceMakerAPI
 from api.speechify_api import SpeechifyAPI
@@ -69,6 +70,14 @@ def save_settings(app_instance):
     app.config['recraft']['size'] = app.recraft_size_var.get().split(' ')[0]
     app.config['recraft']['negative_prompt'] = app.recraft_negative_prompt_var.get()
     
+    # Googler settings
+    if 'googler' not in app.config:
+        app.config['googler'] = {}
+    app.config['googler']['api_key'] = app.googler_api_key_var.get()
+    app.config['googler']['max_threads'] = app.googler_max_threads_var.get()
+    app.config['googler']['timeout'] = app.googler_timeout_var.get()
+    app.config['googler']['aspect_ratio'] = app.googler_aspect_ratio_var.get()
+    
     # ElevenLabs settings
     app.config["elevenlabs"]["api_key"] = app.el_api_key_var.get()
     
@@ -99,6 +108,11 @@ def save_settings(app_instance):
     if 'telegram' not in app.config: 
         app.config['telegram'] = {}
     app.config['telegram']['enabled'] = app.tg_enabled_var.get()
+    
+    # Firebase settings
+    if 'firebase' not in app.config:
+        app.config['firebase'] = {}
+    app.config['firebase']['enabled'] = app.firebase_enabled_var.get()
     app.config['telegram']['api_key'] = app.tg_api_key_var.get()
     app.config['telegram']['chat_id'] = app.tg_chat_id_var.get()
 
@@ -129,6 +143,7 @@ def save_settings(app_instance):
     app.config['montage']['zoom_speed'] = app.montage_zoom_speed_var.get()
     app.config['montage']['transition_effect'] = app.montage_transition_var.get()
     app.config['montage']['font_size'] = app.montage_font_size_var.get()
+    app.config['montage']['font_style'] = app.montage_font_style_var.get()
     app.config['montage']['output_framerate'] = app.montage_output_framerate_var.get()
     
     # Codec settings
@@ -173,12 +188,25 @@ def save_settings(app_instance):
     app.or_api = OpenRouterAPI(app.config)
     app.poll_api = PollinationsAPI(app.config, app)
     app.recraft_api = RecraftAPI(app.config)
+    app.googler_api = GooglerAPI(app.config)
     app.el_api = ElevenLabsAPI(app.config)
     app.vm_api = VoiceMakerAPI(app.config)
     app.tg_api = TelegramAPI(app.config)
     app.firebase_api = FirebaseAPI(app.config)
     app.speechify_api = SpeechifyAPI(app.config)
     app.montage_api = MontageAPI(app.config, app, app.update_progress_for_montage)
+    
+    # Оновлюємо посилання на API в workflow_manager
+    app.workflow_manager.or_api = app.or_api
+    app.workflow_manager.poll_api = app.poll_api
+    app.workflow_manager.recraft_api = app.recraft_api
+    app.workflow_manager.googler_api = app.googler_api
+    app.workflow_manager.el_api = app.el_api
+    app.workflow_manager.vm_api = app.vm_api
+    app.workflow_manager.speechify_api = app.speechify_api
+    app.workflow_manager.montage_api = app.montage_api
+    app.workflow_manager.tg_api = app.tg_api
+    app.workflow_manager.firebase_api = app.firebase_api
     
     # Налаштовуємо шлях до ffmpeg
     setup_ffmpeg_path(app.config)

@@ -12,6 +12,11 @@ def on_language_checkbox_toggle(app, lang_code, var):
     else:
         # ВИПРАВЛЕНО: Тепер ми викликаємо функцію як метод об'єкта 'app'
         app.remove_language_output_path_widgets(lang_code)
+    
+    # Оновлюємо скрол-регіон після зміни
+    if hasattr(app, 'update_scroll_functions'):
+        for update_func in app.update_scroll_functions:
+            update_func()
 
 def add_language_output_path_widgets(app, lang_code):
     if lang_code in app.lang_widgets:
@@ -68,6 +73,11 @@ def add_language_output_path_widgets(app, lang_code):
         'button': browse_btn
     }
     app.update_path_widgets_state()
+    
+    # Оновлюємо скрол-регіон після додавання нових елементів
+    if hasattr(app, 'update_scroll_functions'):
+        for update_func in app.update_scroll_functions:
+            update_func()
 
 def browse_language_output_path(app, lang_code):
     folder = filedialog.askdirectory()
@@ -150,8 +160,14 @@ def create_task_tab(notebook, app):
     app.chain_el_balance_label = ttk.Label(balance_frame, text=f"{app._t('elevenlabs_balance_label')}: N/A")
     app.chain_el_balance_label.pack(side='left', padx=(0,10))
 
+    app.chain_or_balance_label = ttk.Label(balance_frame, text=f"{app._t('openrouter_balance_label')}: N/A")
+    app.chain_or_balance_label.pack(side='left', padx=(0,10))
+
     app.chain_recraft_balance_label = ttk.Label(balance_frame, text=f"{app._t('recraft_balance_label')}: N/A")
     app.chain_recraft_balance_label.pack(side='left', padx=(0,10))
+    
+    app.chain_googler_balance_label = ttk.Label(balance_frame, text="Googler Usage: N/A")
+    app.chain_googler_balance_label.pack(side='left', padx=(0,10))
     
     app.chain_vm_balance_label = ttk.Label(balance_frame, text=f"{app._t('voicemaker_balance_label')}: N/A")
     app.chain_vm_balance_label.pack(side='left')
@@ -164,106 +180,18 @@ def create_task_tab(notebook, app):
     
     ttk.Button(buttons_frame, text=app._t('add_to_queue_button'), command=app.add_to_queue, bootstyle="info").pack(side='left', padx=5)
     
-    # Add Clear Gallery button
-    if hasattr(app, 'firebase_api') and app.firebase_api.is_initialized:
-        ttk.Button(buttons_frame, text="Clear Gallery", command=app.clear_gallery_manually, bootstyle="warning-outline").pack(side='left', padx=5)
-    
-    app.progress_var = tk.DoubleVar()
-    app.progress_bar = ttk.Progressbar(app.chain_scrollable_frame, variable=app.progress_var, maximum=100, bootstyle="success-striped")
-    app.progress_bar.pack(fill='x', padx=10, pady=5)
-    app.progress_label = ttk.Label(app.chain_scrollable_frame, text="")
-    app.progress_label.pack()
-    
-    # Створюємо фрейм для кнопок під прогрес-баром
-    chain_buttons_frame = ttk.Frame(app.chain_scrollable_frame)
-    chain_buttons_frame.pack(pady=5)
-
-    skip_image_button_chain = ttk.Button(
-        chain_buttons_frame,
-        text=app._t('skip_image_button'),
-        command=app._on_skip_image_click,
-        bootstyle="warning",
-        state="disabled"
-    )
-    skip_image_button_chain.pack(side='left', padx=5)
-    app.skip_image_buttons.append(skip_image_button_chain)
-    
-    # Нова кнопка для перемикання сервісу
-    switch_service_button_chain = ttk.Button(
-        chain_buttons_frame,
-        text=app._t('switch_service_button'),
-        command=app._on_switch_service_click,
-        bootstyle="info",
-        state="disabled"
-    )
-    switch_service_button_chain.pack(side='left', padx=5)
-    app.switch_service_buttons.append(switch_service_button_chain)
-
-    # --- Нова кнопка регенерації іншим сервісом ---
-    regenerate_alt_button_chain = ttk.Button(
-        chain_buttons_frame,
-        text=app._t('regenerate_alt_button'),
-        command=app._on_regenerate_alt_click,
-        bootstyle="success",
-        state="disabled"
-    )
-    regenerate_alt_button_chain.pack(side='left', padx=5)
-    app.regenerate_alt_buttons.append(regenerate_alt_button_chain)
-
-    # --- Новий вибір API ---
-    ttk.Label(chain_buttons_frame, text=f"{app._t('image_api_label')}:").pack(side='left', padx=(10, 2))
+    # --- Image Generation API Selector ---
+    ttk.Label(buttons_frame, text=f"{app._t('image_api_label')}:").pack(side='left', padx=(20, 2))
     image_api_combo_chain = ttk.Combobox(
-        chain_buttons_frame, 
+        buttons_frame, 
         textvariable=app.active_image_api_var, 
-        values=["pollinations", "recraft"], 
+        values=["pollinations", "recraft", "googler"], 
         state="readonly",
         width=12
     )
     image_api_combo_chain.pack(side='left', padx=5)
     image_api_combo_chain.bind("<<ComboboxSelected>>", app._on_image_api_select)
     app.image_api_selectors.append(image_api_combo_chain)
-    
-    queue_main_frame = ttk.Labelframe(app.chain_scrollable_frame, text=app._t('task_queue_tab'))
-    queue_main_frame.pack(fill='x', expand=True, padx=10, pady=10)
-
-    queue_control_frame = ttk.Frame(queue_main_frame)
-    queue_control_frame.pack(fill='x', padx=10, pady=5)
-    
-    ttk.Button(queue_control_frame, text=app._t('process_queue_button'), command=app.process_queue, bootstyle="success").pack(side='left', padx=5)
-    
-    app.pause_resume_button = ttk.Button(queue_control_frame, text=app._t('pause_button'), command=app.toggle_pause_resume, bootstyle="warning", state="disabled")
-    app.pause_resume_button.pack(side='left', padx=5)
-    
-    ttk.Button(queue_control_frame, text=app._t('clear_queue_button'), command=app.clear_queue, bootstyle="danger").pack(side='left', padx=5)
-    
-    queue_list_frame = ttk.Frame(queue_main_frame)
-    queue_list_frame.pack(fill='both', expand=True, padx=10, pady=5)
-    
-    columns = ("status", "time")
-    app.queue_tree = ttk.Treeview(queue_list_frame, columns=columns, show='tree headings', height=10, bootstyle="dark")
-    
-    style = ttk.Style()
-    style.configure("Treeview.Heading", relief="groove", borderwidth=1, padding=(5,5))
-    
-    saved_widths = app.config.get("ui_settings", {}).get("queue_column_widths", {})
-    
-    app.queue_tree.heading("#0", text=app._t('task_details_column'))
-    app.queue_tree.column("#0", width=saved_widths.get('task_details', 400), anchor='w')
-    
-    app.queue_tree.heading('status', text=app._t('queue_status_col'))
-    app.queue_tree.column('status', width=saved_widths.get('status', 100), anchor='w')
-    app.queue_tree.heading('time', text=app._t('queue_time_col'))
-    app.queue_tree.column('time', width=saved_widths.get('time', 150), anchor='w')
-
-    app.queue_scrollbar = ttk.Scrollbar(queue_list_frame, orient="vertical", command=app.queue_tree.yview)
-    app.dynamic_scrollbars.append(app.queue_scrollbar)
-    app.queue_tree.configure(yscrollcommand=app.queue_scrollbar.set)
-    app.queue_tree.pack(side="left", fill="both", expand=True)
-    app.queue_scrollbar.pack(side="right", fill="y")
-    
-    app.queue_tree.bind("<Double-1>", app.edit_task_name)
-    
-    app.update_queue_display()
 
     # --- Контейнер для галереї контролю зображень ---
     app.chain_image_gallery_frame = ttk.Labelframe(app.chain_scrollable_frame, text=app._t('image_control_gallery_label'))

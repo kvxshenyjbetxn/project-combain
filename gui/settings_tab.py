@@ -66,7 +66,12 @@ def create_api_settings_subtabs(parent_tab, app):
     or_api_key_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=5)
     add_text_widget_bindings(app, or_api_key_entry)
     ttk.Button(or_frame, text=app._t('test_connection_button'), command=app.test_openrouter_connection, bootstyle="secondary-outline").grid(row=0, column=2, padx=5, pady=5)
+
+    app.settings_or_balance_label = ttk.Label(or_frame, text=f"{app._t('balance_label')}: N/A")
+    app.settings_or_balance_label.grid(row=1, column=0, columnspan=2, sticky='w', padx=5, pady=5)
     
+    ttk.Button(or_frame, text="🔄", command=app.reset_openrouter_balance, bootstyle="light-outline", width=3).grid(row=1, column=2, padx=5, pady=5)
+
     models_frame = ttk.Labelframe(or_scroll_frame, text=app._t('saved_models_label'), bootstyle="secondary")
     models_frame.pack(fill='x', padx=10, pady=5)
     models_frame.grid_columnconfigure(0, weight=1)
@@ -140,8 +145,10 @@ def create_api_settings_subtabs(parent_tab, app):
     image_notebook.pack(fill="both", expand=True, padx=5, pady=5)
     poll_tab = ttk.Frame(image_notebook)
     recraft_tab = ttk.Frame(image_notebook)
+    googler_tab = ttk.Frame(image_notebook)
     image_notebook.add(poll_tab, text=app._t('pollinations_tab_label'))
     image_notebook.add(recraft_tab, text=app._t('recraft_tab_label'))
+    image_notebook.add(googler_tab, text="Googler")
 
     # --- Pollinations Settings ---
     _, poll_scroll_frame = create_scrollable_tab(app, poll_tab)
@@ -224,6 +231,39 @@ def create_api_settings_subtabs(parent_tab, app):
     recraft_negative_prompt_entry.grid(row=6, column=1, sticky='ew', padx=5, pady=5)
     add_text_widget_bindings(app, recraft_negative_prompt_entry)
 
+    # --- Googler Settings ---
+    _, googler_scroll_frame = create_scrollable_tab(app, googler_tab)
+    googler_frame = ttk.Labelframe(googler_scroll_frame, text="Googler API Settings")
+    googler_frame.pack(fill='x', padx=10, pady=5)
+    googler_frame.grid_columnconfigure(1, weight=1)
+    ttk.Label(googler_frame, text=app._t('api_key_label')).grid(row=0, column=0, sticky='w', padx=5, pady=5)
+    app.googler_api_key_var = tk.StringVar(value=app.config.get("googler", {}).get("api_key", ""))
+    googler_api_key_entry = ttk.Entry(googler_frame, textvariable=app.googler_api_key_var, width=50, show="*")
+    googler_api_key_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=5)
+    add_text_widget_bindings(app, googler_api_key_entry)
+    ttk.Button(googler_frame, text=app._t('test_connection_button'), command=app.test_googler_connection, bootstyle="secondary-outline").grid(row=0, column=2, padx=5, pady=5)
+
+    app.settings_googler_usage_label = ttk.Label(googler_frame, text="Usage: N/A")
+    app.settings_googler_usage_label.grid(row=1, column=0, columnspan=3, sticky='w', padx=5, pady=5)
+
+    ttk.Label(googler_frame, text="Max Threads:").grid(row=2, column=0, sticky='w', padx=5, pady=5)
+    app.googler_max_threads_var = tk.IntVar(value=app.config.get("googler", {}).get("max_threads", 25))
+    googler_threads_spinbox = ttk.Spinbox(googler_frame, from_=1, to=25, textvariable=app.googler_max_threads_var, width=10)
+    googler_threads_spinbox.grid(row=2, column=1, sticky='w', padx=5, pady=5)
+    add_text_widget_bindings(app, googler_threads_spinbox)
+
+    ttk.Label(googler_frame, text="Timeout (sec):").grid(row=3, column=0, sticky='w', padx=5, pady=5)
+    app.googler_timeout_var = tk.IntVar(value=app.config.get("googler", {}).get("timeout", 180))
+    googler_timeout_spinbox = ttk.Spinbox(googler_frame, from_=30, to=300, increment=30, textvariable=app.googler_timeout_var, width=10)
+    googler_timeout_spinbox.grid(row=3, column=1, sticky='w', padx=5, pady=5)
+    add_text_widget_bindings(app, googler_timeout_spinbox)
+
+    ttk.Label(googler_frame, text="Aspect Ratio:").grid(row=4, column=0, sticky='w', padx=5, pady=5)
+    app.googler_aspect_ratio_var = tk.StringVar(value=app.config.get("googler", {}).get("aspect_ratio", "IMAGE_ASPECT_RATIO_LANDSCAPE"))
+    googler_aspect_combo = ttk.Combobox(googler_frame, textvariable=app.googler_aspect_ratio_var, values=["IMAGE_ASPECT_RATIO_LANDSCAPE", "IMAGE_ASPECT_RATIO_PORTRAIT", "IMAGE_ASPECT_RATIO_SQUARE"], state="readonly")
+    googler_aspect_combo.grid(row=4, column=1, sticky='ew', padx=5, pady=5)
+    add_text_widget_bindings(app, googler_aspect_combo)
+
     # --- Firebase Settings ---
     create_firebase_settings_tab(firebase_tab, app)
 
@@ -257,6 +297,10 @@ def create_firebase_settings_tab(parent_tab, app):
                            font=('TkDefaultFont', 9),
                            foreground='gray')
     instructions.grid(row=1, column=0, columnspan=3, sticky='w', padx=5, pady=(10, 5))
+
+    # Чекбокс для ввімкнення/вимкнення Firebase
+    app.firebase_enabled_var = tk.BooleanVar(value=app.config.get("firebase", {}).get("enabled", True))
+    ttk.Checkbutton(firebase_frame, variable=app.firebase_enabled_var, text=app._t('enable_firebase_label'), bootstyle="light-round-toggle").grid(row=2, column=0, columnspan=3, sticky='w', padx=5, pady=5)
     
     # Статистика
     stats_frame = ttk.Labelframe(firebase_scroll_frame, text=app._t('statistics_label'))
@@ -559,9 +603,18 @@ def create_montage_settings_tab(parent_tab, app):
     font_size_spinbox.grid(row=6, column=1, sticky='w', padx=5, pady=2)
     add_text_widget_bindings(app, font_size_spinbox)
 
+    app.montage_font_style_var = tk.StringVar(value=montage_cfg.get('font_style'))
+    font_style = ["Arial", "Impact", "Book Antiqua", "Segoe Print"]
+    font_style_combo = ttk.Combobox(montage_frame, textvariable=app.montage_font_style_var, values=font_style,
+                                    state="readonly")
+    font_style_combo.grid(row=7, column=1, sticky='ew', padx=5, pady=2)
+    add_text_widget_bindings(app, font_style_combo)
+    ttk.Label(montage_frame, text=app._t('font_style_label')).grid(row=7, column=0, sticky='w', padx=5, pady=2)
+
     codec_cfg = montage_cfg.get('codec', {})
     codec_frame = ttk.Labelframe(scrollable_frame, text=app._t('montage_codec_settings_label'))
     codec_frame.pack(fill='x', padx=10, pady=5)
+
     
     if sys.platform == "darwin":
         app.codec_options = {

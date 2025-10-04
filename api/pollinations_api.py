@@ -66,42 +66,21 @@ class PollinationsAPI:
         encoded_prompt = urllib.parse.quote(prompt)
         url = f"{self.base_url}/prompt/{encoded_prompt}"
         
-        retry_delay = 10 
-        
-        # Кількість спроб тепер береться з налаштувань, а не з константи
-        # Головна логіка перемикання буде в combain.py, тут ми просто робимо N спроб
-        max_retries = self.app.config.get("pollinations", {}).get("retries", 5)
-
-        for attempt in range(1, max_retries + 1):
-            try:
-                # Перевірка на пропуск користувачем на початку кожної ітерації
-                if self.app.skip_image_event.is_set():
-                    logger.warning("Pollinations -> Генерацію ОДНОГО зображення пропущено користувачем.")
-                    self.app.skip_image_event.clear()
-                    return False
-
-                logger.info(f"Pollinations -> Генерація зображення (спроба #{attempt}/{max_retries})...")
-                
-                response = requests.get(url, params=params, timeout=180)
-                
-                if response.status_code == 200 and response.headers.get('content-type', '').startswith('image/'):
-                    with open(output_path, 'wb') as f:
-                        f.write(response.content)
-                    logger.info(f"Pollinations -> УСПІХ: Зображення збережено в {output_path}")
-                    return True
-                else:
-                    logger.warning(f"Pollinations -> Спроба #{attempt} не вдалася. Статус: {response.status_code}.")
+        try:
+            response = requests.get(url, params=params, timeout=180)
             
-            except requests.exceptions.RequestException as e:
-                logger.error(f"Pollinations -> ПОМИЛКА: Запит не вдався (спроба #{attempt}): {e}.")
-
-            # Якщо це не остання спроба, чекаємо перед повтором
-            if attempt < max_retries:
-                logger.info(f"Повторна спроба через {retry_delay}с...")
-                if self.app.skip_image_event.wait(timeout=retry_delay):
-                    logger.warning("Pollinations -> Генерацію пропущено користувачем під час очікування.")
-                    self.app.skip_image_event.clear()
-                    return False
+            if response.status_code == 200 and response.headers.get('content-type', '').startswith('image/'):
+                with open(output_path, 'wb') as f:
+                    f.write(response.content)
+                logger.info(f"Pollinations -> УСПІХ: Зображення збережено в {output_path}")
+                return True
+            else:
+                logger.warning(f"Pollinations -> Спроба не вдалася. Статус: {response.status_code}.")
+                return False
+        
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Pollinations -> ПОМИЛКА: Запит не вдався: {e}.")
+            return False
 
         # Якщо всі спроби провалилися
         logger.error(f"Pollinations -> Не вдалося згенерувати зображення після {max_retries} спроб.")

@@ -73,13 +73,13 @@ def concatenate_videos(app, video_files, output_path):
         return False
 
 
-def video_chunk_worker(app, images_for_chunk, audio_path, subs_path, output_path, chunk_index, total_chunks):
+def video_chunk_worker(app, images_for_chunk, audio_path, subs_path, output_path, chunk_index, total_chunks, task_key):
     """Process a single video chunk using the montage API."""
     app.log_context.parallel_task = 'Video Montage'
     app.log_context.worker_id = f'Chunk {chunk_index}/{total_chunks}'
     try:
         logger.info(f"ЗАПУСК FFMPEG (відео шматок {chunk_index}/{total_chunks}) для аудіо: {os.path.basename(audio_path)}")
-        if app.montage_api.create_video(images_for_chunk, audio_path, subs_path, output_path):
+        if app.montage_api.create_video(images_for_chunk, audio_path, subs_path, output_path, task_key=task_key, chunk_index=chunk_index):
             logger.info(f"ЗАВЕРШЕННЯ FFMPEG (відео шматок {chunk_index}/{total_chunks})")
             return output_path
         logger.error(f"ПОМИЛКА FFMPEG (відео шматок {chunk_index}/{total_chunks})")

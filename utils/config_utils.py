@@ -30,14 +30,14 @@ def setup_logging():
         detailed_format = logging.Formatter('%(asctime)s - [%(levelname)s] - (%(funcName)s): %(message)s')
         detailed_file_handler.setFormatter(detailed_format)
         logger.addHandler(detailed_file_handler)
-    logger.info("Систему логування успішно налаштовано.")
+    #logger.info("Систему логування успішно налаштовано.")
 
 def load_config():
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
                 config = json.load(f)
-            logging.getLogger("TranslationApp").info("Configuration loaded successfully.")
+            logging.getLogger("TranslationApp").info("Конфігурація завантажена успішно.")
             def update(d, u):
                 for k, v in u.items():
                     if isinstance(v, dict):
@@ -58,7 +58,7 @@ def save_config(config):
     try:
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
             json.dump(config, f, indent=4, ensure_ascii=False)
-        logging.getLogger("TranslationApp").info("Configuration saved successfully.")
+        logging.getLogger("TranslationApp").info("Конфігурація завантажена успішно.")
     except Exception as e:
         logging.getLogger("TranslationApp").error(f"Error saving config: {e}")
         # messagebox.showerror("Помилка", f"Не вдалося зберегти конфігурацію: {e}") # Це краще робити в GUI
@@ -83,6 +83,6 @@ def setup_ffmpeg_path(config):
     ffmpeg_exe_name = "ffmpeg.exe" if sys.platform == "win32" else "ffmpeg"
     
     if shutil.which(ffmpeg_exe_name):
-        logging.getLogger("TranslationApp").info(f"Found system-wide ffmpeg in PATH.")
+        logging.getLogger("TranslationApp").info(f"Знайдено системний ffmpeg у PATH.")
     else:
         logging.getLogger("TranslationApp").warning(f"System-wide '{ffmpeg_exe_name}' not found. Specify the path in Settings.")
