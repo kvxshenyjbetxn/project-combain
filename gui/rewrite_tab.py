@@ -116,6 +116,9 @@ def create_rewrite_tab(notebook, app):
 
     app.rewrite_recraft_balance_label = ttk.Label(balance_frame, text=f"{app._t('recraft_balance_label')}: N/A")
     app.rewrite_recraft_balance_label.pack(side='left', padx=(0,10))
+    
+    app.rewrite_googler_balance_label = ttk.Label(balance_frame, text="Googler Usage: N/A")
+    app.rewrite_googler_balance_label.pack(side='left', padx=(0,10))
 
     app.rewrite_vm_balance_label = ttk.Label(balance_frame, text=f"{app._t('voicemaker_balance_label')}: N/A")
     app.rewrite_vm_balance_label.pack(side='left')
@@ -137,7 +140,7 @@ def create_rewrite_tab(notebook, app):
     image_api_combo_rewrite = ttk.Combobox(
         buttons_frame, 
         textvariable=app.active_image_api_var, 
-        values=["pollinations", "recraft"], 
+        values=["pollinations", "recraft", "googler"], 
         state="readonly",
         width=12
     )

@@ -73,6 +73,9 @@ def create_queue_tab(notebook, app):
 
     app.queue_recraft_balance_label = ttk.Label(balance_frame, text=f"{app._t('recraft_balance_label')}: N/A")
     app.queue_recraft_balance_label.pack(side='left', padx=(0,10))
+    
+    app.queue_googler_balance_label = ttk.Label(balance_frame, text="Googler Usage: N/A")
+    app.queue_googler_balance_label.pack(side='left', padx=(0,10))
 
     app.queue_vm_balance_label = ttk.Label(balance_frame, text=f"{app._t('voicemaker_balance_label')}: N/A")
     app.queue_vm_balance_label.pack(side='left')

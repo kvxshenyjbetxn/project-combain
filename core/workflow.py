@@ -31,6 +31,7 @@ class WorkflowManager:
         self.or_api = app_instance.or_api
         self.poll_api = app_instance.poll_api
         self.recraft_api = app_instance.recraft_api
+        self.googler_api = app_instance.googler_api
         self.el_api = app_instance.el_api
         self.vm_api = app_instance.vm_api
         self.speechify_api = app_instance.speechify_api
@@ -1000,6 +1001,57 @@ class WorkflowManager:
         auto_switch_enabled = self.config.get("ui_settings", {}).get("auto_switch_service_on_fail", False)
         retry_limit_for_switch = self.config.get("ui_settings", {}).get("auto_switch_retry_limit", 10)
         
+        # СПЕЦІАЛЬНА ЛОГІКА ДЛЯ GOOGLER - ПАКЕТНА ГЕНЕРАЦІЯ
+        with self.app.image_api_lock:
+            current_api = self.app.active_image_api_var.get()
+        
+        if current_api == "googler":
+            logger.info(f"[Googler] Using batch generation for {len(prompts)} images with {self.googler_api.max_threads} threads.")
+            progress_text = f"Завд.{task_num}/{total_tasks} | {lang_name} - [Googler] Запуск паралельної генерації {len(prompts)} зображень..."
+            self.app.update_progress(progress_text, queue_type=queue_type)
+            
+            # Підготовка списку (промпт, шлях, індекс)
+            prompts_with_paths = []
+            for i, prompt in enumerate(prompts):
+                image_path = os.path.join(images_folder, f"image_{i+1:03d}.jpg")
+                prompts_with_paths.append((prompt, image_path, i))
+            
+            # Callback для оновлення прогресу після кожного зображення
+            def on_image_complete(index, success, image_path):
+                if not self.app._check_app_state():
+                    return
+                    
+                if success:
+                    prompt = prompts[index]
+                    self.app.image_prompts_map[image_path] = prompt
+                    self.app.root.after(0, self.app._add_image_to_gallery, image_path, task_key, is_rewrite)
+                    
+                    if self.firebase_api.is_initialized:
+                        task_name = data['task'].get('task_name', f"Task {task_key[0]}")
+                        def save_mapping(image_id, local_path):
+                            self.app.image_id_to_path_map[image_id] = local_path
+                        self.firebase_api.upload_and_add_image_in_thread(image_path, task_key, index, task_name, prompt, callback=save_mapping)
+                    
+                    if status_key in self.app.task_completion_status:
+                        self.app.task_completion_status[status_key]["images_generated"] += 1
+                        total = self.app.task_completion_status[status_key].get("total_images", 0)
+                        done = self.app.task_completion_status[status_key]["images_generated"]
+                        self.app.task_completion_status[status_key]['steps'][step_name] = f"{done}/{total}"
+                        if is_rewrite:
+                            self.app.root.after(0, self.app.update_rewrite_task_status_display)
+                        else:
+                            self.app.root.after(0, self.app.update_task_status_display)
+                        
+                        progress_text = f"Завд.{task_num}/{total_tasks} | {lang_name} - [Googler] {self.app._t('step_gen_images')} {done}/{total}"
+                        self.app.update_progress(progress_text, queue_type=queue_type)
+                else:
+                    logger.error(f"[Googler] Failed to generate image {index+1}")
+            
+            # Запуск пакетної генерації
+            self.googler_api.generate_images_batch(prompts_with_paths, on_image_complete=on_image_complete)
+            return True
+        
+        # СТАНДАРТНА ЛОГІКА ДЛЯ POLLINATIONS ТА RECRAFT - ПО ОДНОМУ
         i = 0
         while i < len(prompts):
             if not self.app._check_app_state():
@@ -1029,13 +1081,20 @@ class WorkflowManager:
                     self.app.regenerate_alt_service_event.clear()
                     logger.warning(f"Attempting to regenerate image {i+1} with alternate service.")
                     with self.app.image_api_lock:
-                        alt_service = "recraft" if current_api_for_generation == "pollinations" else "pollinations"
+                        if current_api_for_generation == "googler":
+                            alt_service = "pollinations"
+                        elif current_api_for_generation == "recraft":
+                            alt_service = "pollinations"
+                        else:
+                            alt_service = "googler"
                     
                     success_alt = False
                     if alt_service == "pollinations":
                         success_alt = self.poll_api.generate_image(prompt, image_path)
                     elif alt_service == "recraft":
                         success_alt, _ = self.recraft_api.generate_image(prompt, image_path)
+                    elif alt_service == "googler":
+                        success_alt = self.googler_api.generate_image(prompt, image_path)
 
                     if success_alt:
                         image_generated = True
@@ -1048,6 +1107,8 @@ class WorkflowManager:
                     success = self.poll_api.generate_image(prompt, image_path)
                 elif current_api_for_generation == "recraft":
                     success, _ = self.recraft_api.generate_image(prompt, image_path)
+                elif current_api_for_generation == "googler":
+                    success = self.googler_api.generate_image(prompt, image_path)
 
                 if success:
                     image_generated = True
@@ -1059,13 +1120,20 @@ class WorkflowManager:
                     # Автоматичне перемикання після 10 невдач (якщо увімкнене)
                     if auto_switch_enabled and consecutive_failures >= retry_limit_for_switch:
                         logger.warning(f"Reached {consecutive_failures} consecutive failures. Triggering automatic service switch for ONE image.")
-                        alt_service = "recraft" if current_api_for_generation == "pollinations" else "pollinations"
+                        if current_api_for_generation == "googler":
+                            alt_service = "pollinations"
+                        elif current_api_for_generation == "recraft":
+                            alt_service = "pollinations"
+                        else:
+                            alt_service = "googler"
                         
                         success_alt = False
                         if alt_service == "pollinations":
                             success_alt = self.poll_api.generate_image(prompt, image_path)
                         elif alt_service == "recraft":
                             success_alt, _ = self.recraft_api.generate_image(prompt, image_path)
+                        elif alt_service == "googler":
+                            success_alt = self.googler_api.generate_image(prompt, image_path)
                         
                         if success_alt:
                             image_generated = True

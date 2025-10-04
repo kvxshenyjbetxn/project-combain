@@ -35,6 +35,7 @@ from api.montage_api import MontageAPI
 from api.openrouter_api import OpenRouterAPI
 from api.pollinations_api import PollinationsAPI
 from api.recraft_api import RecraftAPI
+from api.googler_api import GooglerAPI
 from api.telegram_api import TelegramAPI
 from api.voicemaker_api import VoiceMakerAPI
 from api.speechify_api import SpeechifyAPI
@@ -166,6 +167,7 @@ class TranslationApp:
         self.el_api = ElevenLabsAPI(self.config)
         self.vm_api = VoiceMakerAPI(self.config)
         self.recraft_api = RecraftAPI(self.config)
+        self.googler_api = GooglerAPI(self.config)
         self.tg_api = TelegramAPI(self.config)
         self.firebase_api = FirebaseAPI(self.config)
         self.speechify_api = SpeechifyAPI(self.config)
@@ -310,7 +312,9 @@ class TranslationApp:
     def _on_switch_service_click(self):
         with self.image_api_lock:
             current_service = self.active_image_api
-            new_service = "recraft" if current_service == "pollinations" else "pollinations"
+            services = ["pollinations", "recraft", "googler"]
+            current_index = services.index(current_service) if current_service in services else 0
+            new_service = services[(current_index + 1) % len(services)]
             self.active_image_api = new_service
             logger.warning(f"Користувач перемкнув сервіс генерації зображень на: {new_service.capitalize()}")
             messagebox.showinfo("Сервіс змінено", f"Наступні зображення будуть генеруватися за допомогою {new_service.capitalize()}.")
@@ -1428,6 +1432,11 @@ class TranslationApp:
         """Test Recraft connection - delegates to utility function."""
         test_recraft_connection(self)
 
+    def test_googler_connection(self):
+        """Test Googler connection - delegates to utility function."""
+        from utils.googler_utils import test_googler_connection
+        test_googler_connection(self)
+
     def test_telegram_connection(self):
         """Test Telegram connection - delegates to utility function."""
         test_telegram_connection(self)
@@ -1465,6 +1474,11 @@ class TranslationApp:
             self.root.after(0, lambda: self.rewrite_recraft_balance_label.config(text=f"{self._t('recraft_balance_label')}: {recraft_text}"))
             self.root.after(0, lambda: self.queue_recraft_balance_label.config(text=f"{self._t('recraft_balance_label')}: {recraft_text}"))
             logger.info(f"Recraft balance updated: {recraft_balance}")
+            
+            # Оновлюємо Googler usage
+            from utils.googler_utils import update_googler_usage_labels
+            update_googler_usage_labels(self)
+            logger.info("Googler usage updated")
 
             vm_balance = self.vm_api.get_balance()
             if vm_balance is not None:
@@ -1725,6 +1739,8 @@ class TranslationApp:
             elif result['service'] == 'recraft':
                 regeneration_params['model_override'] = result['model']
                 regeneration_params['style_override'] = result['style']
+            elif result['service'] == 'googler':
+                regeneration_params['aspect_ratio'] = result['aspect_ratio']
             
             self._regenerate_image(image_path, **regeneration_params)
 
@@ -1770,6 +1786,11 @@ class TranslationApp:
 
                 temp_recraft_api = RecraftAPI(temp_recraft_config)
                 success, _ = temp_recraft_api.generate_image(prompt_to_use, image_path, **api_params)
+            
+            elif active_api_name == "googler":
+                if 'aspect_ratio' in kwargs:
+                    api_params['aspect_ratio'] = kwargs['aspect_ratio']
+                success = self.googler_api.generate_image(prompt_to_use, image_path, **api_params)
 
             if success:
                 logger.info(f"Image regenerated successfully: {image_path}")
