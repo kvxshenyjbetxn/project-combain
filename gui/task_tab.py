@@ -182,7 +182,7 @@ def create_task_tab(notebook, app):
     image_api_combo_chain = ttk.Combobox(
         buttons_frame, 
         textvariable=app.active_image_api_var, 
-        values=["pollinations", "recraft"], 
+        values=["pollinations", "recraft", "googler"], 
         state="readonly",
         width=12
     )

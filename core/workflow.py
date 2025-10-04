@@ -31,6 +31,7 @@ class WorkflowManager:
         self.or_api = app_instance.or_api
         self.poll_api = app_instance.poll_api
         self.recraft_api = app_instance.recraft_api
+        self.googler_api = app_instance.googler_api
         self.el_api = app_instance.el_api
         self.vm_api = app_instance.vm_api
         self.speechify_api = app_instance.speechify_api
@@ -1029,13 +1030,20 @@ class WorkflowManager:
                     self.app.regenerate_alt_service_event.clear()
                     logger.warning(f"Attempting to regenerate image {i+1} with alternate service.")
                     with self.app.image_api_lock:
-                        alt_service = "recraft" if current_api_for_generation == "pollinations" else "pollinations"
+                        if current_api_for_generation == "googler":
+                            alt_service = "pollinations"
+                        elif current_api_for_generation == "recraft":
+                            alt_service = "pollinations"
+                        else:
+                            alt_service = "googler"
                     
                     success_alt = False
                     if alt_service == "pollinations":
                         success_alt = self.poll_api.generate_image(prompt, image_path)
                     elif alt_service == "recraft":
                         success_alt, _ = self.recraft_api.generate_image(prompt, image_path)
+                    elif alt_service == "googler":
+                        success_alt = self.googler_api.generate_image(prompt, image_path)
 
                     if success_alt:
                         image_generated = True
@@ -1048,6 +1056,8 @@ class WorkflowManager:
                     success = self.poll_api.generate_image(prompt, image_path)
                 elif current_api_for_generation == "recraft":
                     success, _ = self.recraft_api.generate_image(prompt, image_path)
+                elif current_api_for_generation == "googler":
+                    success = self.googler_api.generate_image(prompt, image_path)
 
                 if success:
                     image_generated = True
@@ -1059,13 +1069,20 @@ class WorkflowManager:
                     # Автоматичне перемикання після 10 невдач (якщо увімкнене)
                     if auto_switch_enabled and consecutive_failures >= retry_limit_for_switch:
                         logger.warning(f"Reached {consecutive_failures} consecutive failures. Triggering automatic service switch for ONE image.")
-                        alt_service = "recraft" if current_api_for_generation == "pollinations" else "pollinations"
+                        if current_api_for_generation == "googler":
+                            alt_service = "pollinations"
+                        elif current_api_for_generation == "recraft":
+                            alt_service = "pollinations"
+                        else:
+                            alt_service = "googler"
                         
                         success_alt = False
                         if alt_service == "pollinations":
                             success_alt = self.poll_api.generate_image(prompt, image_path)
                         elif alt_service == "recraft":
                             success_alt, _ = self.recraft_api.generate_image(prompt, image_path)
+                        elif alt_service == "googler":
+                            success_alt = self.googler_api.generate_image(prompt, image_path)
                         
                         if success_alt:
                             image_generated = True

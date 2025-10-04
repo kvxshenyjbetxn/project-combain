@@ -35,6 +35,7 @@ from api.montage_api import MontageAPI
 from api.openrouter_api import OpenRouterAPI
 from api.pollinations_api import PollinationsAPI
 from api.recraft_api import RecraftAPI
+from api.googler_api import GooglerAPI
 from api.telegram_api import TelegramAPI
 from api.voicemaker_api import VoiceMakerAPI
 from api.speechify_api import SpeechifyAPI
@@ -166,6 +167,7 @@ class TranslationApp:
         self.el_api = ElevenLabsAPI(self.config)
         self.vm_api = VoiceMakerAPI(self.config)
         self.recraft_api = RecraftAPI(self.config)
+        self.googler_api = GooglerAPI(self.config)
         self.tg_api = TelegramAPI(self.config)
         self.firebase_api = FirebaseAPI(self.config)
         self.speechify_api = SpeechifyAPI(self.config)
@@ -310,7 +312,9 @@ class TranslationApp:
     def _on_switch_service_click(self):
         with self.image_api_lock:
             current_service = self.active_image_api
-            new_service = "recraft" if current_service == "pollinations" else "pollinations"
+            services = ["pollinations", "recraft", "googler"]
+            current_index = services.index(current_service) if current_service in services else 0
+            new_service = services[(current_index + 1) % len(services)]
             self.active_image_api = new_service
             logger.warning(f"Користувач перемкнув сервіс генерації зображень на: {new_service.capitalize()}")
             messagebox.showinfo("Сервіс змінено", f"Наступні зображення будуть генеруватися за допомогою {new_service.capitalize()}.")
@@ -1427,6 +1431,11 @@ class TranslationApp:
     def test_recraft_connection(self):
         """Test Recraft connection - delegates to utility function."""
         test_recraft_connection(self)
+
+    def test_googler_connection(self):
+        """Test Googler connection - delegates to utility function."""
+        from utils.googler_utils import test_googler_connection
+        test_googler_connection(self)
 
     def test_telegram_connection(self):
         """Test Telegram connection - delegates to utility function."""
