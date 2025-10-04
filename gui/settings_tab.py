@@ -557,8 +557,30 @@ def create_montage_settings_tab(parent_tab, app):
     framerate_combo.grid(row=2, column=1, sticky='w', padx=5, pady=2)
     add_text_widget_bindings(app, framerate_combo)
     
+    # Whisper Backend Selection
+    ttk.Label(montage_frame, text="Whisper Engine:").grid(row=3, column=0, sticky='w', padx=5, pady=2)
+    app.whisper_backend_var = tk.StringVar(value=montage_cfg.get('whisper_backend', 'standard'))
+    backend_combo = ttk.Combobox(montage_frame, textvariable=app.whisper_backend_var, 
+                                  values=["standard", "amd"], state="readonly", width=18)
+    backend_combo.grid(row=3, column=1, sticky='w', padx=5, pady=2)
+    add_text_widget_bindings(app, backend_combo)
+    
+    # Backend info
+    ttk.Label(montage_frame, text="ℹ️ Standard: Mac/NVIDIA GPU | AMD: Windows AMD GPU", 
+              font=("", 8), foreground="gray").grid(row=4, column=0, columnspan=3, sticky='w', padx=5)
+    
+    # AMD CPU Threads
+    ttk.Label(montage_frame, text="AMD CPU Threads:").grid(row=5, column=0, sticky='w', padx=5, pady=2)
+    app.amd_whisper_threads_var = tk.IntVar(value=montage_cfg.get('amd_whisper_threads', 4))
+    threads_spinbox = ttk.Spinbox(montage_frame, from_=1, to=16, 
+                                   textvariable=app.amd_whisper_threads_var, width=10)
+    threads_spinbox.grid(row=5, column=1, sticky='w', padx=5, pady=2)
+    add_text_widget_bindings(app, threads_spinbox)
+    ttk.Label(montage_frame, text="(Допоміжні CPU потоки, GPU завжди 0)", 
+              font=("", 8), foreground="gray").grid(row=6, column=0, columnspan=3, sticky='w', padx=5)
+    
     motion_frame = ttk.Labelframe(montage_frame, text=app._t('motion_settings_label'), bootstyle="secondary")
-    motion_frame.grid(row=3, column=0, columnspan=3, sticky='ew', padx=5, pady=5)
+    motion_frame.grid(row=7, column=0, columnspan=3, sticky='ew', padx=5, pady=5)
     motion_frame.grid_columnconfigure(1, weight=1)
     app.montage_motion_enabled_var = tk.BooleanVar(value=montage_cfg.get('motion_enabled', True))
     ttk.Checkbutton(motion_frame, text=app._t('enable_motion_label'), variable=app.montage_motion_enabled_var, bootstyle="light-round-toggle").grid(row=0, column=0, columnspan=2, sticky='w', padx=5)
@@ -579,7 +601,7 @@ def create_montage_settings_tab(parent_tab, app):
     ttk.Scale(motion_frame, from_=0, to=20, orient=tk.HORIZONTAL, variable=app.montage_motion_intensity_var).grid(row=2, column=1, sticky='ew', padx=5, pady=2)
     
     zoom_frame = ttk.Labelframe(montage_frame, text=app._t('zoom_settings_label'), bootstyle="secondary")
-    zoom_frame.grid(row=4, column=0, columnspan=3, sticky='ew', padx=5, pady=5)
+    zoom_frame.grid(row=8, column=0, columnspan=3, sticky='ew', padx=5, pady=5)
     zoom_frame.grid_columnconfigure(1, weight=1)
     app.montage_zoom_enabled_var = tk.BooleanVar(value=montage_cfg.get('zoom_enabled', True))
     ttk.Checkbutton(zoom_frame, text=app._t('enable_zoom_label'), variable=app.montage_zoom_enabled_var, bootstyle="light-round-toggle").grid(row=0, column=0, columnspan=2, sticky='w', padx=5)
@@ -590,26 +612,26 @@ def create_montage_settings_tab(parent_tab, app):
     app.montage_zoom_speed_var = tk.DoubleVar(value=montage_cfg.get('zoom_speed'))
     ttk.Scale(zoom_frame, from_=0.5, to=10, orient=tk.HORIZONTAL, variable=app.montage_zoom_speed_var).grid(row=2, column=1, sticky='ew', padx=5, pady=2)
     
-    ttk.Label(montage_frame, text=app._t('transition_effect_label')).grid(row=5, column=0, sticky='w', padx=5, pady=2)
+    ttk.Label(montage_frame, text=app._t('transition_effect_label')).grid(row=9, column=0, sticky='w', padx=5, pady=2)
     app.montage_transition_var = tk.StringVar(value=montage_cfg.get('transition_effect'))
     
     transitions = [app._t('transition_none'), "fade", "wipeleft", "wiperight", "wipeup", "wipedown", "slideleft", "slideright", "slideup", "slidedown", "circleopen", "dissolve"]
     transition_combo = ttk.Combobox(montage_frame, textvariable=app.montage_transition_var, values=transitions, state="readonly")
-    transition_combo.grid(row=5, column=1, sticky='ew', padx=5, pady=2)
+    transition_combo.grid(row=9, column=1, sticky='ew', padx=5, pady=2)
     add_text_widget_bindings(app, transition_combo)
-    ttk.Label(montage_frame, text=app._t('font_size_label')).grid(row=6, column=0, sticky='w', padx=5, pady=2)
+    ttk.Label(montage_frame, text=app._t('font_size_label')).grid(row=10, column=0, sticky='w', padx=5, pady=2)
     app.montage_font_size_var = tk.IntVar(value=montage_cfg.get('font_size'))
     font_size_spinbox = ttk.Spinbox(montage_frame, from_=10, to=200, textvariable=app.montage_font_size_var, width=10)
-    font_size_spinbox.grid(row=6, column=1, sticky='w', padx=5, pady=2)
+    font_size_spinbox.grid(row=10, column=1, sticky='w', padx=5, pady=2)
     add_text_widget_bindings(app, font_size_spinbox)
 
     app.montage_font_style_var = tk.StringVar(value=montage_cfg.get('font_style'))
     font_style = ["Arial", "Impact", "Book Antiqua", "Segoe Print"]
     font_style_combo = ttk.Combobox(montage_frame, textvariable=app.montage_font_style_var, values=font_style,
                                     state="readonly")
-    font_style_combo.grid(row=7, column=1, sticky='ew', padx=5, pady=2)
+    font_style_combo.grid(row=11, column=1, sticky='ew', padx=5, pady=2)
     add_text_widget_bindings(app, font_style_combo)
-    ttk.Label(montage_frame, text=app._t('font_style_label')).grid(row=7, column=0, sticky='w', padx=5, pady=2)
+    ttk.Label(montage_frame, text=app._t('font_style_label')).grid(row=11, column=0, sticky='w', padx=5, pady=2)
 
     codec_cfg = montage_cfg.get('codec', {})
     codec_frame = ttk.Labelframe(scrollable_frame, text=app._t('montage_codec_settings_label'))

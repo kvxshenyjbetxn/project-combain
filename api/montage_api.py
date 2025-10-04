@@ -71,7 +71,16 @@ class MontageAPI:
 
     def create_subtitles(self, audio_path, output_ass_path):
         """Створює файл субтитрів .ass з аудіофайлу."""
-        logger.info(f"Субтитри -> Початок створення субтитрів для {os.path.basename(audio_path)}")
+        backend = self.config.get('whisper_backend', 'standard')
+        
+        if backend == 'amd':
+            return self._create_subtitles_amd(audio_path, output_ass_path)
+        else:
+            return self._create_subtitles_standard(audio_path, output_ass_path)
+    
+    def _create_subtitles_standard(self, audio_path, output_ass_path):
+        """Створює субтитри використовуючи стандартний Whisper (Python library)."""
+        logger.info(f"Субтитри (Standard) -> Початок створення субтитрів для {os.path.basename(audio_path)}")
         try:
             model = self._load_whisper_model()
             if not model:
@@ -159,6 +168,217 @@ class MontageAPI:
             })
 
         return new_segments
+
+    def _create_subtitles_amd(self, audio_path, output_ass_path):
+        """Створює субтитри використовуючи AMD Whisper CLI."""
+        logger.info(f"Субтитри (AMD) -> Початок для {os.path.basename(audio_path)}")
+        
+        try:
+            # 1. Визначення шляху до main.exe
+            if getattr(sys, 'frozen', False):
+                base_path = os.path.dirname(sys.executable)
+            else:
+                base_path = os.path.dirname(os.path.dirname(__file__))
+            
+            amd_exe = os.path.join(base_path, "whisper-cli-amd", "main.exe")
+            
+            if not os.path.exists(amd_exe):
+                logger.error(f"AMD Whisper не знайдено: {amd_exe}")
+                self.update_callback("Помилка: AMD Whisper CLI не знайдено!")
+                return False
+            
+            # 2. Визначення моделі
+            model_name = self.config.get('whisper_model', 'base')
+            model_file = f"ggml-{model_name}.bin"
+            model_path = os.path.join(base_path, "whisper-cli-amd", model_file)
+            
+            if not os.path.exists(model_path):
+                logger.error(f"Модель AMD Whisper не знайдена: {model_path}")
+                self.update_callback(f"Помилка: Модель {model_file} не знайдена в папці whisper-cli-amd!")
+                return False
+            
+            logger.info(f"Використання AMD моделі: {model_file}")
+            
+            # 3. Параметри запуску
+            language = 'en'  # TODO: Визначати динамічно з lang_code якщо потрібно
+            threads = self.config.get('amd_whisper_threads', 4)
+            gpu_id = 0  # Завжди перша відеокарта
+            
+            # 4. Підготовка команди
+            cmd = [
+                amd_exe,
+                '-m', model_path,
+                '-f', audio_path,
+                '-l', language,
+                '-osrt',              # Вивести SRT файл
+                '-gpu', str(gpu_id),  # Використовувати AMD GPU
+                '-t', str(threads),   # CPU threads (допоміжно)
+                '--no-timestamps'     # Не друкувати в консоль
+            ]
+            
+            logger.info(f"Виконання AMD CLI: {' '.join(cmd)}")
+            self.update_callback(f"Транскрибація AMD GPU... {os.path.basename(audio_path)}")
+            
+            # 5. Запуск процесу
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                timeout=600  # 10 хвилин таймаут для довгих аудіо
+            )
+            
+            if result.returncode != 0:
+                logger.error(f"AMD Whisper повернув код помилки {result.returncode}")
+                logger.error(f"stderr: {result.stderr}")
+                self.update_callback(f"Помилка AMD Whisper: {result.stderr[:200]}")
+                return False
+            
+            # 6. Знайти створений SRT файл
+            # AMD CLI створює файл як {audio_path}.srt
+            expected_srt = f"{audio_path}.srt"
+            
+            if not os.path.exists(expected_srt):
+                # Спробувати альтернативну назву (без розширення)
+                base_name = os.path.splitext(audio_path)[0]
+                expected_srt = f"{base_name}.srt"
+            
+            if not os.path.exists(expected_srt):
+                logger.error(f"SRT файл не знайдено після AMD Whisper: очікувалось {expected_srt}")
+                logger.error(f"stdout: {result.stdout}")
+                return False
+            
+            logger.info(f"SRT файл знайдено: {expected_srt}")
+            
+            # 7. Конвертація SRT → ASS
+            self.update_callback(f"Конвертація в ASS... {os.path.basename(audio_path)}")
+            success = self._convert_srt_to_ass(expected_srt, output_ass_path)
+            
+            # 8. Видалення тимчасового SRT
+            try:
+                if os.path.exists(expected_srt):
+                    os.remove(expected_srt)
+                    logger.info(f"Видалено тимчасовий SRT: {expected_srt}")
+            except Exception as e:
+                logger.warning(f"Не вдалося видалити тимчасовий SRT: {e}")
+            
+            if success:
+                logger.info(f"Субтитри (AMD) -> УСПІХ: {output_ass_path}")
+            
+            return success
+            
+        except subprocess.TimeoutExpired:
+            logger.error("AMD Whisper перевищив таймаут (10 хв)")
+            self.update_callback("Помилка: таймаут транскрибації AMD")
+            return False
+        except Exception as e:
+            logger.error(f"Субтитри (AMD) -> ПОМИЛКА: {e}", exc_info=True)
+            self.update_callback(f"Помилка AMD транскрибації: {e}")
+            return False
+
+    def _convert_srt_to_ass(self, srt_path, output_ass_path):
+        """Конвертує SRT файл в ASS зі збереженням стилів."""
+        try:
+            # 1. Парсинг SRT
+            segments = self._parse_srt_file(srt_path)
+            
+            if not segments:
+                logger.error("SRT файл порожній або невалідний")
+                return False
+            
+            logger.info(f"Розпарсено {len(segments)} сегментів з SRT")
+            
+            # 2. Обробка довгих сегментів (використати існуючу логіку)
+            processed_segments = []
+            for segment in segments:
+                processed_segments.extend(self._split_long_segment(segment))
+            
+            logger.info(f"Після обробки довгих сегментів: {len(processed_segments)} сегментів")
+            
+            # 3. Генерація ASS (копіювати з _create_subtitles_standard)
+            header = f"""[Script Info]
+Title: {os.path.basename(output_ass_path)}
+ScriptType: v4.00+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,{self.config.get('font_style')},{self.config.get('font_size', 48)},&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,2,2,10,10,10,1
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+            
+            with open(output_ass_path, 'w', encoding='utf-8') as f:
+                f.write(header)
+                for segment in processed_segments:
+                    start_time = format_time(segment['start'])
+                    end_time = format_time(segment['end'])
+                    text = segment['text'].strip().replace('\n', ' \\N ')
+                    dialogue_line = f"Dialogue: 0,{start_time},{end_time},Default,,0,0,0,,{text}\n"
+                    f.write(dialogue_line)
+            
+            logger.info(f"ASS файл успішно створено: {output_ass_path}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Помилка конвертації SRT→ASS: {e}", exc_info=True)
+            return False
+
+    def _parse_srt_file(self, srt_path):
+        """Парсить SRT файл у формат segments [{start, end, text}]."""
+        segments = []
+        
+        try:
+            with open(srt_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # Розбити на блоки
+            blocks = content.strip().split('\n\n')
+            
+            for block in blocks:
+                lines = block.strip().split('\n')
+                if len(lines) < 3:
+                    continue  # Пропустити невалідні блоки
+                
+                try:
+                    timecode_line = lines[1]
+                    text_lines = lines[2:]
+                    
+                    # Парсинг таймкодів: "00:00:00,000 --> 00:00:02,500"
+                    if ' --> ' not in timecode_line:
+                        continue
+                    
+                    start_str, end_str = timecode_line.split(' --> ')
+                    
+                    start_sec = self._srt_time_to_seconds(start_str.strip())
+                    end_sec = self._srt_time_to_seconds(end_str.strip())
+                    text = ' '.join(text_lines).strip()
+                    
+                    if text:  # Пропустити порожні субтитри
+                        segments.append({
+                            'start': start_sec,
+                            'end': end_sec,
+                            'text': text
+                        })
+                
+                except (ValueError, IndexError) as e:
+                    logger.warning(f"Не вдалося розпарсити SRT блок: {e}")
+                    continue
+            
+            return segments
+            
+        except Exception as e:
+            logger.error(f"Помилка читання SRT файлу: {e}", exc_info=True)
+            return []
+
+    def _srt_time_to_seconds(self, time_str):
+        """Конвертує SRT timestamp '00:00:02,500' в секунди (float)."""
+        # Формат: HH:MM:SS,mmm
+        time_part, ms_part = time_str.split(',')
+        h, m, s = map(int, time_part.split(':'))
+        ms = int(ms_part)
+        
+        total_seconds = h * 3600 + m * 60 + s + ms / 1000.0
+        return total_seconds
 
     def create_video(self, image_paths, audio_path, ass_path, output_video_path, task_key=None, chunk_index=None):
         """Створює відео з зображень, аудіо та субтитрів з ефектами, ЗАВЖДИ з переходами."""

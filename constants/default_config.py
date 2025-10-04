@@ -88,7 +88,9 @@ DEFAULT_CONFIG = {
         "processed_links_file": "processed_links.txt"
     },
     "montage": {
+        "whisper_backend": "standard",
         "whisper_model": "base",
+        "amd_whisper_threads": 4,
         "ffmpeg_path": "",
         "motion_enabled": True,
         "motion_type": "Гойдання (знак нескінченності)",
