@@ -19,6 +19,60 @@ from core.audio_pipeline import AudioWorkerPool, AudioPipelineItem, Transcriptio
 
 logger = logging.getLogger("TranslationApp")
 
+def parse_image_prompts(raw_prompts_text, logger_instance=None):
+    """
+    Розумний парсинг промптів для зображень.
+    Підтримує два формати:
+    1. З нумерацією: "1. prompt\n2. prompt" або "1) prompt\n2) prompt"
+    2. Без нумерації: кожен абзац = окремий промпт
+    
+    Returns:
+        list: Список промптів
+    """
+    if not raw_prompts_text or not raw_prompts_text.strip():
+        return []
+    
+    log = logger_instance if logger_instance else logger
+    
+    # Спочатку перевіряємо чи є нумерація
+    # Шукаємо патерни типу "1.", "2.", "1)", "2)" на початку рядка або після пробілу
+    numbered_pattern = r'(?:^|\s)(\d+[\.\)])\s+'
+    numbered_matches = re.findall(numbered_pattern, raw_prompts_text, re.MULTILINE)
+    
+    # Якщо знайшли хоча б 2 номери - використовуємо split за нумерацією
+    if len(numbered_matches) >= 2:
+        log.info(f"[Prompt Parser] Detected numbered format with {len(numbered_matches)} items")
+        single_line_text = raw_prompts_text.replace('\n', ' ').strip()
+        prompt_blocks = re.split(r'\s*\d+[\.\)]\s*', single_line_text)
+        prompts = [block.strip() for block in prompt_blocks if block.strip()]
+        log.info(f"[Prompt Parser] Parsed {len(prompts)} prompts using numbered split")
+        return prompts
+    
+    # Інакше ділимо за абзацами
+    log.info("[Prompt Parser] No numbering detected, using paragraph-based split")
+    
+    # Спочатку пробуємо поділити за подвійними переносами рядків (звичайні абзаци)
+    paragraphs = raw_prompts_text.split('\n\n')
+    # Фільтруємо порожні та дуже короткі (менше 10 символів)
+    prompts = [p.strip() for p in paragraphs if p.strip() and len(p.strip()) > 10]
+    
+    # Якщо отримали менше 2 промптів, пробуємо розділити за одинарними переносами
+    if len(prompts) < 2:
+        log.info("[Prompt Parser] Double newline split gave <2 prompts, trying single newline")
+        lines = raw_prompts_text.split('\n')
+        prompts = [line.strip() for line in lines if line.strip() and len(line.strip()) > 10]
+    
+    # Видаляємо можливі артефакти нумерації на початку промптів
+    cleaned_prompts = []
+    for p in prompts:
+        # Видаляємо "1. ", "2) " тощо з початку
+        cleaned = re.sub(r'^\d+[\.\)]\s*', '', p).strip()
+        if cleaned:
+            cleaned_prompts.append(cleaned)
+    
+    log.info(f"[Prompt Parser] Parsed {len(cleaned_prompts)} prompts using paragraph split")
+    return cleaned_prompts
+
 class WorkflowManager:
     def __init__(self, app_instance):
         """
@@ -809,11 +863,8 @@ class WorkflowManager:
             elif os.path.exists(prompts_path):
                 with open(prompts_path, 'r', encoding='utf-8') as f: raw_prompts = f.read()
 
-            image_prompts = []
-            if raw_prompts:
-                single_line_text = raw_prompts.replace('\n', ' ').strip()
-                prompt_blocks = re.split(r'\s*\d+[\.\)]\s*', single_line_text)
-                image_prompts = [block.strip() for block in prompt_blocks if block.strip()]
+            # Використовуємо розумний парсер промптів
+            image_prompts = parse_image_prompts(raw_prompts, logger)
 
             images_folder = os.path.join(output_path, "images")
             os.makedirs(images_folder, exist_ok=True)
@@ -910,11 +961,8 @@ class WorkflowManager:
             elif os.path.exists(prompts_path):
                 with open(prompts_path, 'r', encoding='utf-8') as f: raw_prompts = f.read()
 
-            image_prompts = []
-            if raw_prompts:
-                single_line_text = raw_prompts.replace('\n', ' ').strip()
-                prompt_blocks = re.split(r'\s*\d+[\.\)]\s*', single_line_text)
-                image_prompts = [block.strip() for block in prompt_blocks if block.strip()]
+            # Використовуємо розумний парсер промптів
+            image_prompts = parse_image_prompts(raw_prompts, logger)
 
             images_folder = os.path.join(lang_output_path, "images")
             os.makedirs(images_folder, exist_ok=True)
