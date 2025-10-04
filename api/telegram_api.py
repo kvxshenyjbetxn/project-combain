@@ -48,7 +48,7 @@ class TelegramAPI:
                 response = requests.post(url, json=payload, timeout=10)
                 
                 if response.status_code == 200:
-                    logger.info(f"Telegram -> Сповіщення успішно надіслано в чат ID {self.chat_id}.")
+                    logger.debug(f"Telegram -> Сповіщення успішно надіслано в чат ID {self.chat_id}.")
                     return
                 
                 elif 400 <= response.status_code < 500:
@@ -66,6 +66,29 @@ class TelegramAPI:
     def send_message_in_thread(self, message):
         """Відправляє повідомлення у окремому потоці, щоб не блокувати GUI."""
         thread = threading.Thread(target=self.send_message, args=(message,), daemon=True)
+        thread.start()
+
+    def send_plain_text_message(self, message):
+        """Відправляє просте текстове повідомлення без форматування."""
+        if not all([self.enabled, self.api_key, self.chat_id]):
+            logger.debug("Telegram -> Сповіщення вимкнені або не налаштовані. Пропускаємо.")
+            return
+
+        url = f"{self.base_url}/sendMessage"
+        payload = {'chat_id': self.chat_id, 'text': message}
+        
+        try:
+            response = requests.post(url, json=payload, timeout=10)
+            if response.status_code == 200:
+                logger.debug(f"Telegram -> Просте текстове сповіщення успішно надіслано в чат ID {self.chat_id}.")
+            else:
+                logger.error(f"Telegram -> Помилка надсилання простого тексту ({response.status_code}): {response.text}")
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Telegram -> Помилка мережі при відправці простого тексту: {e}")
+
+    def send_plain_text_in_thread(self, message):
+        """Відправляє просте текстове повідомлення у окремому потоці."""
+        thread = threading.Thread(target=self.send_plain_text_message, args=(message,), daemon=True)
         thread.start()
 
     def send_message_with_buttons(self, message, buttons):
@@ -87,7 +110,7 @@ class TelegramAPI:
         try:
             response = requests.post(url, json=payload, timeout=15)
             if response.status_code == 200:
-                logger.info("Telegram -> Повідомлення з кнопками успішно надіслано.")
+                logger.debug("Telegram -> Повідомлення з кнопками успішно надіслано.")
             else:
                 logger.error(f"Telegram -> Помилка надсилання повідомлення з кнопками ({response.status_code}): {response.text}")
         except requests.exceptions.RequestException as e:

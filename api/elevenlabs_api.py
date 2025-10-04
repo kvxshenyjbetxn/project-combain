@@ -182,3 +182,44 @@ class ElevenLabsAPI:
             except requests.exceptions.RequestException as e:
                 logger.error(f"ElevenLabs -> Помилка мережі при завантаженні: {e}. Повторна спроба через 10с...")
                 time.sleep(10)
+
+    def wait_for_elevenlabs_task(self, app, task_id, output_path):
+        """Wait for ElevenLabs task completion and download the result."""
+        max_wait_time, wait_interval, waited_time = 600, 15, 0
+        
+        while waited_time < max_wait_time:
+            if not app._check_app_state(): 
+                return False
+
+            status = self.check_task_status(task_id)
+            logger.info(f"[Chain] Audio task {task_id} status: {status}")
+
+            if status == 'ending':
+                logger.info(f"Task {task_id} is ready. Attempting to download.")
+                time.sleep(2)
+                return self.download_audio(task_id, output_path)
+            
+            if status in ['error', 'error_handled']:
+                logger.error(f"Task {task_id} failed with status '{status}'.")
+                return False
+
+            if status in ['waiting', 'processing']:
+                pass
+            
+            elif status == 'ending_processed':
+                 logger.warning(f"Task {task_id} has status 'ending_processed', which means the audio was already downloaded and possibly deleted.")
+                 return False
+
+            elif status is None:
+                logger.error(f"Failed to get status for task {task_id}. Aborting wait.")
+                return False
+
+            # Робимо очікування переривчастим
+            for _ in range(wait_interval):
+                if not app._check_app_state(): 
+                    return False
+                time.sleep(1)
+            waited_time += wait_interval
+
+        logger.warning(f"[Chain] Timed out waiting for audio task {task_id}.")
+        return False

@@ -1,7 +1,7 @@
 import tkinter as tk
 import ttkbootstrap as ttk
 
-from .gui_utils import add_text_widget_bindings
+from .gui_utils import add_text_widget_bindings, create_scrollable_tab, create_scrolled_text
 
 # --- Функції-помічники для віджетів на цій вкладці ---
 
@@ -23,6 +23,7 @@ def add_rewrite_lang_widgets(app, lang_code):
     steps_frame.pack(side='left', fill='x', expand=True)
 
     app.rewrite_lang_step_vars[lang_code] = {
+        'download': tk.BooleanVar(value=True),
         'transcribe': tk.BooleanVar(value=True),
         'rewrite': tk.BooleanVar(value=True),
         'cta': tk.BooleanVar(value=True),
@@ -34,10 +35,14 @@ def add_rewrite_lang_widgets(app, lang_code):
     }
     
     steps = {
+        'download': app._t('step_download'),
         'transcribe': app._t('step_transcribe'),
-        'rewrite': app._t('step_rewrite'), 'cta': app._t('step_cta'), 
-        'gen_prompts': app._t('step_gen_prompts'), 'gen_images': app._t('step_gen_images'), 
-        'audio': app._t('step_audio'), 'create_subtitles': app._t('step_create_subtitles'),
+        'rewrite': app._t('step_rewrite'), 
+        'cta': app._t('step_cta'), 
+        'gen_prompts': app._t('step_gen_prompts'), 
+        'gen_images': app._t('step_gen_images'), 
+        'audio': app._t('step_audio'), 
+        'create_subtitles': app._t('step_create_subtitles'),
         'create_video': app._t('step_create_video')
     }
     
@@ -61,9 +66,17 @@ def create_rewrite_tab(notebook, app):
     'notebook' - це головний записник, куди буде додано вкладку.
     'app' - це посилання на головний клас програми для доступу до його функцій та змінних.
     """
-    app.rewrite_canvas, app.rewrite_scrollable_frame = app._create_scrollable_tab(app.rewrite_frame)
+    app.rewrite_canvas, app.rewrite_scrollable_frame = create_scrollable_tab(app, app.rewrite_frame)
     
-    # Інформаційна рамка замість поля для вводу
+    # --- Блок для введення посилань ---
+    links_frame = ttk.Labelframe(app.rewrite_scrollable_frame, text=app._t('youtube_links_label'))
+    links_frame.pack(fill='x', expand=True, padx=10, pady=5)
+    
+    app.rewrite_links_text, text_container_widget = create_scrolled_text(app, links_frame, height=5, width=60)
+    text_container_widget.pack(fill='both', expand=True, padx=5, pady=5)
+    add_text_widget_bindings(app, app.rewrite_links_text)
+
+    # Інформаційна рамка для локальних файлів
     info_frame = ttk.Labelframe(app.rewrite_scrollable_frame, text=app._t('local_audio_work_label'))
     info_frame.pack(fill='x', expand=True, padx=10, pady=5)
     ttk.Label(info_frame, text=app._t('rewrite_instructions_label'), justify='left').pack(padx=5, pady=5)
@@ -98,8 +111,14 @@ def create_rewrite_tab(notebook, app):
     app.rewrite_el_balance_label = ttk.Label(balance_frame, text=f"{app._t('elevenlabs_balance_label')}: N/A")
     app.rewrite_el_balance_label.pack(side='left', padx=(0,10))
 
+    app.rewrite_or_balance_label = ttk.Label(balance_frame, text=f"{app._t('openrouter_balance_label')}: N/A")
+    app.rewrite_or_balance_label.pack(side='left', padx=(0,10))
+
     app.rewrite_recraft_balance_label = ttk.Label(balance_frame, text=f"{app._t('recraft_balance_label')}: N/A")
     app.rewrite_recraft_balance_label.pack(side='left', padx=(0,10))
+    
+    app.rewrite_googler_balance_label = ttk.Label(balance_frame, text="Googler Usage: N/A")
+    app.rewrite_googler_balance_label.pack(side='left', padx=(0,10))
 
     app.rewrite_vm_balance_label = ttk.Label(balance_frame, text=f"{app._t('voicemaker_balance_label')}: N/A")
     app.rewrite_vm_balance_label.pack(side='left')
@@ -109,83 +128,25 @@ def create_rewrite_tab(notebook, app):
 
     buttons_frame = ttk.Frame(app.rewrite_scrollable_frame)
     buttons_frame.pack(fill='x', padx=10, pady=5)
-    ttk.Button(buttons_frame, text=app._t('add_to_queue_button'), command=app.add_to_rewrite_queue, bootstyle="info").pack(side='left', padx=5)
     
-    # Створюємо фрейм для кнопок
-    rewrite_buttons_frame = ttk.Frame(app.rewrite_scrollable_frame)
-    rewrite_buttons_frame.pack(pady=5)
+    # Оновлена кнопка, яка тепер викликає універсальну функцію
+    ttk.Button(buttons_frame, text=app._t('add_to_queue_button'), command=app.add_to_rewrite_queue, bootstyle="info").pack(side='left', padx=5)
+    # Нова кнопка для завантаження посилань з файлу
+    ttk.Button(buttons_frame, text=app._t('load_from_file_button'), command=app.load_links_from_file, bootstyle="secondary").pack(side='left', padx=5)
 
-    skip_image_button_rewrite = ttk.Button(
-        rewrite_buttons_frame,
-        text=app._t('skip_image_button'),
-        command=app._on_skip_image_click,
-        bootstyle="warning",
-        state="disabled"
-    )
-    skip_image_button_rewrite.pack(side='left', padx=5)
-    app.skip_image_buttons.append(skip_image_button_rewrite)
 
-    # Нова кнопка для перемикання сервісу
-    switch_service_button_rewrite = ttk.Button(
-        rewrite_buttons_frame,
-        text=app._t('switch_service_button'),
-        command=app._on_switch_service_click,
-        bootstyle="info",
-        state="disabled"
-    )
-    switch_service_button_rewrite.pack(side='left', padx=5)
-    app.switch_service_buttons.append(switch_service_button_rewrite)
-
-    # --- Нова кнопка регенерації іншим сервісом ---
-    regenerate_alt_button_rewrite = ttk.Button(
-        rewrite_buttons_frame,
-        text=app._t('regenerate_alt_button'),
-        command=app._on_regenerate_alt_click,
-        bootstyle="success",
-        state="disabled"
-    )
-    regenerate_alt_button_rewrite.pack(side='left', padx=5)
-    app.regenerate_alt_buttons.append(regenerate_alt_button_rewrite)
-
-    # --- Новий вибір API ---
-    ttk.Label(rewrite_buttons_frame, text=f"{app._t('image_api_label')}:").pack(side='left', padx=(10, 2))
+    # --- Image Generation API Selector ---
+    ttk.Label(buttons_frame, text=f"{app._t('image_api_label')}:").pack(side='left', padx=(20, 2))
     image_api_combo_rewrite = ttk.Combobox(
-        rewrite_buttons_frame, 
+        buttons_frame, 
         textvariable=app.active_image_api_var, 
-        values=["pollinations", "recraft"], 
+        values=["pollinations", "recraft", "googler"], 
         state="readonly",
         width=12
     )
     image_api_combo_rewrite.pack(side='left', padx=5)
     image_api_combo_rewrite.bind("<<ComboboxSelected>>", app._on_image_api_select)
     app.image_api_selectors.append(image_api_combo_rewrite)
-
-    queue_main_frame = ttk.Labelframe(app.rewrite_scrollable_frame, text=app._t('task_queue_tab'))
-    queue_main_frame.pack(fill='x', expand=True, padx=10, pady=10)
-
-    queue_control_frame = ttk.Frame(queue_main_frame)
-    queue_control_frame.pack(fill='x', padx=10, pady=5)
-    ttk.Button(queue_control_frame, text=app._t('process_queue_button'), command=app.process_rewrite_queue, bootstyle="success").pack(side='left', padx=5)
-    ttk.Button(queue_control_frame, text=app._t('clear_queue_button'), command=app.clear_rewrite_queue, bootstyle="danger").pack(side='left', padx=5)
-    
-    queue_list_frame = ttk.Frame(queue_main_frame)
-    queue_list_frame.pack(fill='both', expand=True, padx=10, pady=5)
-    
-    columns = ("status", "time")
-    app.rewrite_queue_tree = ttk.Treeview(queue_list_frame, columns=columns, show='tree headings', height=10, bootstyle="dark")
-    app.rewrite_queue_tree.heading("#0", text=app._t('task_details_column'))
-    app.rewrite_queue_tree.column("#0", width=400, anchor='w')
-    app.rewrite_queue_tree.heading('status', text=app._t('queue_status_col'))
-    app.rewrite_queue_tree.column('status', width=100, anchor='w')
-    app.rewrite_queue_tree.heading('time', text=app._t('queue_time_col'))
-    app.rewrite_queue_tree.column('time', width=150, anchor='w')
-    
-    app.rewrite_queue_scrollbar = ttk.Scrollbar(queue_list_frame, orient="vertical", command=app.rewrite_queue_tree.yview)
-    app.dynamic_scrollbars.append(app.rewrite_queue_scrollbar)
-    app.rewrite_queue_tree.configure(yscrollcommand=app.rewrite_queue_scrollbar.set)
-    app.rewrite_queue_tree.pack(side="left", fill="both", expand=True)
-    app.rewrite_queue_scrollbar.pack(side="right", fill="y")
-    app.update_rewrite_queue_display()
 
     # --- Контейнер для галереї контролю зображень ---
     app.rewrite_image_gallery_frame = ttk.Labelframe(app.rewrite_scrollable_frame, text=app._t('image_control_gallery_label'))

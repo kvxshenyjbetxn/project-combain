@@ -6,7 +6,7 @@ import sys
 from constants.default_config import DEFAULT_CONFIG
 from constants.recraft_substyles import RECRAFT_SUBSTYLES
 
-from .gui_utils import add_text_widget_bindings
+from .gui_utils import add_text_widget_bindings, create_scrollable_tab, create_scrolled_text
 
 # --- Головна функція для створення вкладки ---
 
@@ -48,13 +48,15 @@ def create_api_settings_subtabs(parent_tab, app):
     or_tab = ttk.Frame(api_notebook)
     audio_tab = ttk.Frame(api_notebook)
     image_tab = ttk.Frame(api_notebook)
+    firebase_tab = ttk.Frame(api_notebook)
 
     api_notebook.add(or_tab, text=app._t('openrouter_tab_label'))
     api_notebook.add(audio_tab, text=app._t('audio_tab_label'))
     api_notebook.add(image_tab, text=app._t('image_tab_label'))
+    api_notebook.add(firebase_tab, text="Firebase")
 
     # --- OpenRouter Settings ---
-    _, or_scroll_frame = app._create_scrollable_tab(or_tab)
+    _, or_scroll_frame = create_scrollable_tab(app, or_tab)
     or_frame = ttk.Labelframe(or_scroll_frame, text=app._t('openrouter_settings_label'))
     or_frame.pack(fill='x', padx=10, pady=5)
     or_frame.grid_columnconfigure(1, weight=1)
@@ -64,7 +66,12 @@ def create_api_settings_subtabs(parent_tab, app):
     or_api_key_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=5)
     add_text_widget_bindings(app, or_api_key_entry)
     ttk.Button(or_frame, text=app._t('test_connection_button'), command=app.test_openrouter_connection, bootstyle="secondary-outline").grid(row=0, column=2, padx=5, pady=5)
+
+    app.settings_or_balance_label = ttk.Label(or_frame, text=f"{app._t('balance_label')}: N/A")
+    app.settings_or_balance_label.grid(row=1, column=0, columnspan=2, sticky='w', padx=5, pady=5)
     
+    ttk.Button(or_frame, text="🔄", command=app.reset_openrouter_balance, bootstyle="light-outline", width=3).grid(row=1, column=2, padx=5, pady=5)
+
     models_frame = ttk.Labelframe(or_scroll_frame, text=app._t('saved_models_label'), bootstyle="secondary")
     models_frame.pack(fill='x', padx=10, pady=5)
     models_frame.grid_columnconfigure(0, weight=1)
@@ -86,7 +93,7 @@ def create_api_settings_subtabs(parent_tab, app):
     audio_notebook.add(vm_tab, text=app._t('voicemaker_tab_label'))
     audio_notebook.add(speechify_tab, text=app._t('speechify_tab_label'))
 
-    _, el_scroll_frame = app._create_scrollable_tab(el_tab)
+    _, el_scroll_frame = create_scrollable_tab(app, el_tab)
     el_frame = ttk.Labelframe(el_scroll_frame, text=app._t('elevenlabs_settings_label'))
     el_frame.pack(fill='x', padx=10, pady=5)
     el_frame.grid_columnconfigure(1, weight=1)
@@ -99,7 +106,7 @@ def create_api_settings_subtabs(parent_tab, app):
     app.settings_el_balance_label = ttk.Label(el_frame, text=f"{app._t('balance_label')}: N/A")
     app.settings_el_balance_label.grid(row=1, column=0, columnspan=3, sticky='w', padx=5, pady=5)
 
-    _, vm_scroll_frame = app._create_scrollable_tab(vm_tab)
+    _, vm_scroll_frame = create_scrollable_tab(app, vm_tab)
     vm_frame = ttk.Labelframe(vm_scroll_frame, text=app._t('voicemaker_settings_label'))
     vm_frame.pack(fill='x', padx=10, pady=5)
     vm_frame.grid_columnconfigure(1, weight=1)
@@ -122,7 +129,7 @@ def create_api_settings_subtabs(parent_tab, app):
     add_text_widget_bindings(app, vm_char_limit_spinbox)
 
     # --- Speechify Settings ---
-    _, speechify_scroll_frame = app._create_scrollable_tab(speechify_tab)
+    _, speechify_scroll_frame = create_scrollable_tab(app, speechify_tab)
     speechify_frame = ttk.Labelframe(speechify_scroll_frame, text=app._t('speechify_settings_label'))
     speechify_frame.pack(fill='x', padx=10, pady=5)
     speechify_frame.grid_columnconfigure(1, weight=1)
@@ -138,11 +145,13 @@ def create_api_settings_subtabs(parent_tab, app):
     image_notebook.pack(fill="both", expand=True, padx=5, pady=5)
     poll_tab = ttk.Frame(image_notebook)
     recraft_tab = ttk.Frame(image_notebook)
+    googler_tab = ttk.Frame(image_notebook)
     image_notebook.add(poll_tab, text=app._t('pollinations_tab_label'))
     image_notebook.add(recraft_tab, text=app._t('recraft_tab_label'))
+    image_notebook.add(googler_tab, text="Googler")
 
     # --- Pollinations Settings ---
-    _, poll_scroll_frame = app._create_scrollable_tab(poll_tab)
+    _, poll_scroll_frame = create_scrollable_tab(app, poll_tab)
     poll_frame = ttk.Labelframe(poll_scroll_frame, text=app._t('pollinations_settings_label'))
     poll_frame.pack(fill='x', padx=10, pady=5)
     poll_frame.grid_columnconfigure(1, weight=1)
@@ -180,7 +189,7 @@ def create_api_settings_subtabs(parent_tab, app):
     ttk.Checkbutton(poll_frame, variable=app.poll_remove_logo_var, text=app._t('remove_logo_label'), bootstyle="light-round-toggle").grid(row=6, column=0, sticky='w', padx=5, pady=5)
 
     # --- Recraft Settings ---
-    _, recraft_scroll_frame = app._create_scrollable_tab(recraft_tab)
+    _, recraft_scroll_frame = create_scrollable_tab(app, recraft_tab)
     recraft_frame = ttk.Labelframe(recraft_scroll_frame, text=app._t('recraft_settings_label'))
     recraft_frame.pack(fill='x', padx=10, pady=5)
     recraft_frame.grid_columnconfigure(1, weight=1)
@@ -222,8 +231,108 @@ def create_api_settings_subtabs(parent_tab, app):
     recraft_negative_prompt_entry.grid(row=6, column=1, sticky='ew', padx=5, pady=5)
     add_text_widget_bindings(app, recraft_negative_prompt_entry)
 
+    # --- Googler Settings ---
+    _, googler_scroll_frame = create_scrollable_tab(app, googler_tab)
+    googler_frame = ttk.Labelframe(googler_scroll_frame, text="Googler API Settings")
+    googler_frame.pack(fill='x', padx=10, pady=5)
+    googler_frame.grid_columnconfigure(1, weight=1)
+    ttk.Label(googler_frame, text=app._t('api_key_label')).grid(row=0, column=0, sticky='w', padx=5, pady=5)
+    app.googler_api_key_var = tk.StringVar(value=app.config.get("googler", {}).get("api_key", ""))
+    googler_api_key_entry = ttk.Entry(googler_frame, textvariable=app.googler_api_key_var, width=50, show="*")
+    googler_api_key_entry.grid(row=0, column=1, sticky='ew', padx=5, pady=5)
+    add_text_widget_bindings(app, googler_api_key_entry)
+    ttk.Button(googler_frame, text=app._t('test_connection_button'), command=app.test_googler_connection, bootstyle="secondary-outline").grid(row=0, column=2, padx=5, pady=5)
+
+    app.settings_googler_usage_label = ttk.Label(googler_frame, text="Usage: N/A")
+    app.settings_googler_usage_label.grid(row=1, column=0, columnspan=3, sticky='w', padx=5, pady=5)
+
+    ttk.Label(googler_frame, text="Max Threads:").grid(row=2, column=0, sticky='w', padx=5, pady=5)
+    app.googler_max_threads_var = tk.IntVar(value=app.config.get("googler", {}).get("max_threads", 25))
+    googler_threads_spinbox = ttk.Spinbox(googler_frame, from_=1, to=25, textvariable=app.googler_max_threads_var, width=10)
+    googler_threads_spinbox.grid(row=2, column=1, sticky='w', padx=5, pady=5)
+    add_text_widget_bindings(app, googler_threads_spinbox)
+
+    ttk.Label(googler_frame, text="Timeout (sec):").grid(row=3, column=0, sticky='w', padx=5, pady=5)
+    app.googler_timeout_var = tk.IntVar(value=app.config.get("googler", {}).get("timeout", 180))
+    googler_timeout_spinbox = ttk.Spinbox(googler_frame, from_=30, to=300, increment=30, textvariable=app.googler_timeout_var, width=10)
+    googler_timeout_spinbox.grid(row=3, column=1, sticky='w', padx=5, pady=5)
+    add_text_widget_bindings(app, googler_timeout_spinbox)
+
+    ttk.Label(googler_frame, text="Aspect Ratio:").grid(row=4, column=0, sticky='w', padx=5, pady=5)
+    app.googler_aspect_ratio_var = tk.StringVar(value=app.config.get("googler", {}).get("aspect_ratio", "IMAGE_ASPECT_RATIO_LANDSCAPE"))
+    googler_aspect_combo = ttk.Combobox(googler_frame, textvariable=app.googler_aspect_ratio_var, values=["IMAGE_ASPECT_RATIO_LANDSCAPE", "IMAGE_ASPECT_RATIO_PORTRAIT", "IMAGE_ASPECT_RATIO_SQUARE"], state="readonly")
+    googler_aspect_combo.grid(row=4, column=1, sticky='ew', padx=5, pady=5)
+    add_text_widget_bindings(app, googler_aspect_combo)
+
+    # --- Firebase Settings ---
+    create_firebase_settings_tab(firebase_tab, app)
+
+def create_firebase_settings_tab(parent_tab, app):
+    """Створює вкладку з налаштуваннями Firebase."""
+    _, firebase_scroll_frame = create_scrollable_tab(app, parent_tab)
+    
+    # Основні налаштування Firebase
+    firebase_frame = ttk.Labelframe(firebase_scroll_frame, text=app._t('firebase_connection_label'))
+    firebase_frame.pack(fill='x', padx=10, pady=5)
+    firebase_frame.grid_columnconfigure(1, weight=1)
+    
+    # User ID для синхронізації
+    ttk.Label(firebase_frame, text=app._t('your_user_id_label'), font=('TkDefaultFont', 10, 'bold')).grid(row=0, column=0, sticky='w', padx=5, pady=5)
+    user_id = getattr(app.firebase_api, 'user_id', 'Not available')
+    app.firebase_user_id_var = tk.StringVar(value=user_id)
+    user_id_entry = ttk.Entry(firebase_frame, textvariable=app.firebase_user_id_var, state='readonly', width=30)
+    user_id_entry.grid(row=0, column=1, sticky='w', padx=5, pady=5)
+    
+    # Кнопка копіювання
+    def copy_user_id():
+        app.root.clipboard_clear()
+        app.root.clipboard_append(user_id)
+        print(f"[INFO] User ID '{user_id}' скопійовано в буфер обміну!")
+    
+    ttk.Button(firebase_frame, text=app._t('copy_button'), command=copy_user_id, bootstyle="info-outline").grid(row=0, column=2, padx=5, pady=5)
+    
+    # Інструкції
+    instructions = ttk.Label(firebase_frame, 
+                           text=app._t('firebase_instructions_text'),
+                           font=('TkDefaultFont', 9),
+                           foreground='gray')
+    instructions.grid(row=1, column=0, columnspan=3, sticky='w', padx=5, pady=(10, 5))
+
+    # Чекбокс для ввімкнення/вимкнення Firebase
+    app.firebase_enabled_var = tk.BooleanVar(value=app.config.get("firebase", {}).get("enabled", True))
+    ttk.Checkbutton(firebase_frame, variable=app.firebase_enabled_var, text=app._t('enable_firebase_label'), bootstyle="light-round-toggle").grid(row=2, column=0, columnspan=3, sticky='w', padx=5, pady=5)
+    
+    # Статистика
+    stats_frame = ttk.Labelframe(firebase_scroll_frame, text=app._t('statistics_label'))
+    stats_frame.pack(fill='x', padx=10, pady=5)
+    stats_frame.grid_columnconfigure(1, weight=1)
+    
+    app.firebase_logs_stat_var = tk.StringVar(value=app._t('loading_label_text').replace('\n', ' '))
+    app.firebase_images_stat_var = tk.StringVar(value=app._t('loading_label_text').replace('\n', ' '))
+    
+    ttk.Label(stats_frame, text=app._t('logs_label')).grid(row=0, column=0, sticky='w', padx=5, pady=2)
+    ttk.Label(stats_frame, textvariable=app.firebase_logs_stat_var).grid(row=0, column=1, sticky='w', padx=5, pady=2)
+    
+    ttk.Label(stats_frame, text=app._t('images_label')).grid(row=1, column=0, sticky='w', padx=5, pady=2)
+    ttk.Label(stats_frame, textvariable=app.firebase_images_stat_var).grid(row=1, column=1, sticky='w', padx=5, pady=2)
+    
+    # Кнопки керування
+    control_frame = ttk.Labelframe(firebase_scroll_frame, text=app._t('data_management_label'))
+    control_frame.pack(fill='x', padx=10, pady=5)
+    
+    # Опція автоочищення галереї
+    app.firebase_auto_clear_gallery_var = tk.BooleanVar(value=app.config.get("firebase", {}).get("auto_clear_gallery", True))
+    ttk.Checkbutton(control_frame, variable=app.firebase_auto_clear_gallery_var, text=app._t('auto_clear_gallery_label'), bootstyle="light-round-toggle").pack(anchor='w', padx=5, pady=5)
+    
+    ttk.Button(control_frame, text=app._t('clear_logs_button'), command=app.clear_firebase_logs, bootstyle="warning-outline").pack(side=tk.LEFT, padx=5, pady=5)
+    ttk.Button(control_frame, text=app._t('clear_images_button'), command=app.clear_firebase_images, bootstyle="danger-outline").pack(side=tk.LEFT, padx=5, pady=5)
+    ttk.Button(control_frame, text=app._t('refresh_stats_button_firebase'), command=app.refresh_firebase_stats, bootstyle="secondary-outline").pack(side=tk.LEFT, padx=5, pady=5)
+    
+    # Оновлюємо статистику при відкритті
+    app.refresh_firebase_stats()
+
 def create_language_settings_tab(parent_tab, app):
-    canvas, scrollable_frame = app._create_scrollable_tab(parent_tab)
+    canvas, scrollable_frame = create_scrollable_tab(app, parent_tab)
     
     lang_frame = ttk.Labelframe(scrollable_frame, text=app._t('language_settings_label'))
     lang_frame.pack(fill='both', expand=True, padx=10, pady=5)
@@ -250,7 +359,7 @@ def create_language_settings_tab(parent_tab, app):
     app.populate_language_list()
 
 def create_prompts_settings_tab(parent_tab, app):
-    canvas, scrollable_frame = app._create_scrollable_tab(parent_tab)
+    canvas, scrollable_frame = create_scrollable_tab(app, parent_tab)
 
     trans_prompt_frame = ttk.Labelframe(scrollable_frame, text=app._t("translation_model_label"))
     trans_prompt_frame.pack(fill='x', padx=10, pady=5)
@@ -310,7 +419,7 @@ def create_prompts_settings_tab(parent_tab, app):
     app.prompt_text_frame.pack(fill="x")
     app.prompt_text_frame.pack_propagate(False)
 
-    app.prompt_gen_prompt_text, text_container_widget = app._create_scrolled_text(app.prompt_text_frame, height=4, width=60, relief="flat", insertbackground="white")
+    app.prompt_gen_prompt_text, text_container_widget = create_scrolled_text(app, app.prompt_text_frame, height=4, width=60, relief="flat", insertbackground="white")
     text_container_widget.pack(fill="both", expand=True)
     add_text_widget_bindings(app, app.prompt_gen_prompt_text)
 
@@ -365,7 +474,7 @@ def create_prompts_settings_tab(parent_tab, app):
     app.cta_text_frame.pack(fill="x")
     app.cta_text_frame.pack_propagate(False)
 
-    app.cta_prompt_text, text_container_widget = app._create_scrolled_text(app.cta_text_frame, height=4, width=60, relief="flat", insertbackground="white")
+    app.cta_prompt_text, text_container_widget = create_scrolled_text(app, app.cta_text_frame, height=4, width=60, relief="flat", insertbackground="white")
     text_container_widget.pack(fill="both", expand=True)
     add_text_widget_bindings(app, app.cta_prompt_text)
 
@@ -407,7 +516,7 @@ def create_prompts_settings_tab(parent_tab, app):
     add_text_widget_bindings(app, cta_tokens_spinbox)
 
 def create_montage_settings_tab(parent_tab, app):
-    _, scrollable_frame = app._create_scrollable_tab(parent_tab)
+    _, scrollable_frame = create_scrollable_tab(app, parent_tab)
 
     parallel_cfg = app.config.get('parallel_processing', DEFAULT_CONFIG['parallel_processing'])
     p_frame = ttk.Labelframe(scrollable_frame, text=app._t('parallel_settings_label'))
@@ -494,9 +603,18 @@ def create_montage_settings_tab(parent_tab, app):
     font_size_spinbox.grid(row=6, column=1, sticky='w', padx=5, pady=2)
     add_text_widget_bindings(app, font_size_spinbox)
 
+    app.montage_font_style_var = tk.StringVar(value=montage_cfg.get('font_style'))
+    font_style = ["Arial", "Impact", "Book Antiqua", "Segoe Print"]
+    font_style_combo = ttk.Combobox(montage_frame, textvariable=app.montage_font_style_var, values=font_style,
+                                    state="readonly")
+    font_style_combo.grid(row=7, column=1, sticky='ew', padx=5, pady=2)
+    add_text_widget_bindings(app, font_style_combo)
+    ttk.Label(montage_frame, text=app._t('font_style_label')).grid(row=7, column=0, sticky='w', padx=5, pady=2)
+
     codec_cfg = montage_cfg.get('codec', {})
     codec_frame = ttk.Labelframe(scrollable_frame, text=app._t('montage_codec_settings_label'))
     codec_frame.pack(fill='x', padx=10, pady=5)
+
     
     if sys.platform == "darwin":
         app.codec_options = {
@@ -588,7 +706,7 @@ def create_montage_settings_tab(parent_tab, app):
     app.update_codec_settings_ui()
 
 def create_other_settings_tab(parent_tab, app):
-    _, scrollable_frame = app._create_scrollable_tab(parent_tab)
+    _, scrollable_frame = create_scrollable_tab(app, parent_tab)
 
     general_frame = ttk.Labelframe(scrollable_frame, text=app._t('general_settings_label'))
     general_frame.pack(fill='x', padx=10, pady=5)
@@ -658,6 +776,8 @@ def create_other_settings_tab(parent_tab, app):
     
     app.toggle_default_dir_widgets()
 
+    # (Firebase settings moved exclusively to API tab – duplicate section removed)
+
     templates_frame = ttk.Labelframe(scrollable_frame, text=app._t('rewrite_templates_label'))
     templates_frame.pack(fill='x', padx=10, pady=5)
     templates_frame.grid_columnconfigure(0, weight=1)
@@ -700,6 +820,7 @@ def create_other_settings_tab(parent_tab, app):
     add_text_widget_bindings(app, tg_chat_id_entry)
     
     ttk.Button(tg_frame, text=app._t('test_telegram_button'), command=app.test_telegram_connection, bootstyle="secondary-outline").grid(row=1, column=2, rowspan=2, padx=5, pady=2, sticky='ns')
+
     # Новий віджет для вибору режиму звіту
     ttk.Label(tg_frame, text=app._t('report_timing_label')).grid(row=3, column=0, sticky='w', padx=5, pady=5)
     app.tg_report_timing_var = tk.StringVar(value=tg_cfg.get('report_timing', 'per_task'))

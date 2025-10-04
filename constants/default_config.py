@@ -61,7 +61,22 @@ DEFAULT_CONFIG = {
             "download": True,
             "transcribe": True,
             "rewrite": True
+        },
+        "mobile_bot": {
+            "enabled": False,
+            "api_key": "",
+            "chat_id": ""
         }
+    },
+    "firebase": {
+        "enabled": True,
+        "database_url": "https://projectcombain-default-rtdb.europe-west1.firebasedatabase.app",
+        "storage_bucket": "gs://projectcombain.firebasestorage.app",
+        "auto_clear_gallery": True,
+        "api_key": "AIzaSyBWHOg1tUdL5nGUFsNq4KuTjttToBE2QkQ",
+    },
+    "user_settings": {
+        "user_id": ""
     },
     "parallel_processing": {
         "enabled": True,
