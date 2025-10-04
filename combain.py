@@ -1474,6 +1474,11 @@ class TranslationApp:
             self.root.after(0, lambda: self.rewrite_recraft_balance_label.config(text=f"{self._t('recraft_balance_label')}: {recraft_text}"))
             self.root.after(0, lambda: self.queue_recraft_balance_label.config(text=f"{self._t('recraft_balance_label')}: {recraft_text}"))
             logger.info(f"Recraft balance updated: {recraft_balance}")
+            
+            # Оновлюємо Googler usage
+            from utils.googler_utils import update_googler_usage_labels
+            update_googler_usage_labels(self)
+            logger.info("Googler usage updated")
 
             vm_balance = self.vm_api.get_balance()
             if vm_balance is not None:
@@ -1734,6 +1739,8 @@ class TranslationApp:
             elif result['service'] == 'recraft':
                 regeneration_params['model_override'] = result['model']
                 regeneration_params['style_override'] = result['style']
+            elif result['service'] == 'googler':
+                regeneration_params['aspect_ratio'] = result['aspect_ratio']
             
             self._regenerate_image(image_path, **regeneration_params)
 
@@ -1779,6 +1786,11 @@ class TranslationApp:
 
                 temp_recraft_api = RecraftAPI(temp_recraft_config)
                 success, _ = temp_recraft_api.generate_image(prompt_to_use, image_path, **api_params)
+            
+            elif active_api_name == "googler":
+                if 'aspect_ratio' in kwargs:
+                    api_params['aspect_ratio'] = kwargs['aspect_ratio']
+                success = self.googler_api.generate_image(prompt_to_use, image_path, **api_params)
 
             if success:
                 logger.info(f"Image regenerated successfully: {image_path}")

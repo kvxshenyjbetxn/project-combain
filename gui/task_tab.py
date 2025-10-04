@@ -166,6 +166,9 @@ def create_task_tab(notebook, app):
     app.chain_recraft_balance_label = ttk.Label(balance_frame, text=f"{app._t('recraft_balance_label')}: N/A")
     app.chain_recraft_balance_label.pack(side='left', padx=(0,10))
     
+    app.chain_googler_balance_label = ttk.Label(balance_frame, text="Googler Usage: N/A")
+    app.chain_googler_balance_label.pack(side='left', padx=(0,10))
+    
     app.chain_vm_balance_label = ttk.Label(balance_frame, text=f"{app._t('voicemaker_balance_label')}: N/A")
     app.chain_vm_balance_label.pack(side='left')
 

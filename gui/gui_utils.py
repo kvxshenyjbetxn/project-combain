@@ -263,7 +263,7 @@ class AdvancedRegenerateDialog(tk.Toplevel):
         # API Service Selector
         ttk.Label(master, text=self.app._t('service_label')).grid(row=1, column=0, sticky='w', padx=5, pady=5)
         self.api_var = tk.StringVar(value=self.app.config.get("ui_settings", {}).get("image_generation_api", "pollinations"))
-        api_combo = ttk.Combobox(master, textvariable=self.api_var, values=["pollinations", "recraft"], state="readonly")
+        api_combo = ttk.Combobox(master, textvariable=self.api_var, values=["pollinations", "recraft", "googler"], state="readonly")
         api_combo.grid(row=1, column=1, sticky="ew", padx=5, pady=5)
         api_combo.bind("<<ComboboxSelected>>", self.update_model_options)
 
@@ -295,6 +295,11 @@ class AdvancedRegenerateDialog(tk.Toplevel):
             self.recraft_style_var = tk.StringVar(value=self.app.config["recraft"]["style"])
             recraft_style_combo = ttk.Combobox(self.model_frame, textvariable=self.recraft_style_var, values=["realistic_image", "digital_illustration", "vector_illustration", "icon", "logo_raster"], state="readonly")
             recraft_style_combo.grid(row=1, column=1, sticky='ew', padx=5, pady=2)
+        elif service == "googler":
+            ttk.Label(self.model_frame, text="Aspect Ratio:").grid(row=0, column=0, sticky='w', padx=5, pady=2)
+            self.googler_aspect_var = tk.StringVar(value=self.app.config.get("googler", {}).get("aspect_ratio", "IMAGE_ASPECT_RATIO_LANDSCAPE"))
+            googler_aspect_combo = ttk.Combobox(self.model_frame, textvariable=self.googler_aspect_var, values=["IMAGE_ASPECT_RATIO_LANDSCAPE", "IMAGE_ASPECT_RATIO_PORTRAIT", "IMAGE_ASPECT_RATIO_SQUARE"], state="readonly")
+            googler_aspect_combo.grid(row=0, column=1, sticky='ew', padx=5, pady=2)
 
     def buttonbox(self):
         box = ttk.Frame(self)
@@ -316,6 +321,8 @@ class AdvancedRegenerateDialog(tk.Toplevel):
         elif self.result["service"] == "recraft":
             self.result["model"] = self.recraft_model_var.get()
             self.result["style"] = self.recraft_style_var.get()
+        elif self.result["service"] == "googler":
+            self.result["aspect_ratio"] = self.googler_aspect_var.get()
         self.destroy()
 
     def cancel(self, event=None):
