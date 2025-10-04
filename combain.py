@@ -1315,7 +1315,7 @@ class TranslationApp:
             self.update_progress(progress_text)
             logger.info(f"[Chain] Starting subtitle creation for {lang_name}...")
             if os.path.exists(audio_file_path):
-                if self.montage_api.create_subtitles(audio_file_path, subs_file_path):
+                if self.montage_api.create_subtitles(audio_file_path, subs_file_path, lang_code):
                     logger.info(f"[Chain] Subtitles for {lang_name} created successfully.")
                     self._send_telegram_notification('create_subtitles', lang_name, task_num, total_tasks)
                 else:

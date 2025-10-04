@@ -136,6 +136,7 @@ def save_settings(app_instance):
     app.config['montage']['ffmpeg_path'] = app.montage_ffmpeg_path_var.get()
     app.config['montage']['whisper_backend'] = app.whisper_backend_var.get()
     app.config['montage']['whisper_model'] = app.montage_whisper_model_var.get()
+    app.config['montage']['amd_whisper_use_gpu'] = app.amd_whisper_use_gpu_var.get()
     app.config['montage']['amd_whisper_threads'] = app.amd_whisper_threads_var.get()
     app.config['montage']['motion_enabled'] = app.montage_motion_enabled_var.get()
     app.config['montage']['motion_type'] = app.montage_motion_type_var.get()

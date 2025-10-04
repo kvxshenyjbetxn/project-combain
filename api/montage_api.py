@@ -69,12 +69,12 @@ class MontageAPI:
                 self.whisper_model_instance = None
         return self.whisper_model_instance
 
-    def create_subtitles(self, audio_path, output_ass_path):
+    def create_subtitles(self, audio_path, output_ass_path, lang_code=None):
         """Створює файл субтитрів .ass з аудіофайлу."""
         backend = self.config.get('whisper_backend', 'standard')
         
         if backend == 'amd':
-            return self._create_subtitles_amd(audio_path, output_ass_path)
+            return self._create_subtitles_amd(audio_path, output_ass_path, lang_code)
         else:
             return self._create_subtitles_standard(audio_path, output_ass_path)
     
@@ -169,7 +169,7 @@ class MontageAPI:
 
         return new_segments
 
-    def _create_subtitles_amd(self, audio_path, output_ass_path):
+    def _create_subtitles_amd(self, audio_path, output_ass_path, lang_code=None):
         """Створює субтитри використовуючи AMD Whisper CLI."""
         logger.info(f"Субтитри (AMD) -> Початок для {os.path.basename(audio_path)}")
         
@@ -200,9 +200,16 @@ class MontageAPI:
             logger.info(f"Використання AMD моделі: {model_file}")
             
             # 3. Параметри запуску
-            language = 'en'  # TODO: Визначати динамічно з lang_code якщо потрібно
+            # Мова - з lang_code (конвертуємо в lowercase) або за замовчуванням 'en'
+            if lang_code:
+                language = lang_code.lower()
+                logger.info(f"Мова транскрипції: {language} (з lang_code: {lang_code})")
+            else:
+                language = 'en'
+                logger.info(f"Мова транскрипції: {language} (за замовчуванням)")
+            
             threads = self.config.get('amd_whisper_threads', 4)
-            gpu_id = 0  # Завжди перша відеокарта
+            use_gpu = self.config.get('amd_whisper_use_gpu', True)
             
             # 4. Підготовка команди
             cmd = [
@@ -210,11 +217,18 @@ class MontageAPI:
                 '-m', model_path,
                 '-f', audio_path,
                 '-l', language,
-                '-osrt',              # Вивести SRT файл
-                '-gpu', str(gpu_id),  # Використовувати AMD GPU
-                '-t', str(threads),   # CPU threads (допоміжно)
-                '--no-timestamps'     # Не друкувати в консоль
+                '-osrt',           # Вивести SRT файл
+                '-t', str(threads) # CPU threads
             ]
+            
+            # Додати GPU параметр тільки якщо use_gpu=True
+            if use_gpu:
+                cmd.extend(['-gpu', '0'])
+                logger.info(f"Режим: GPU (AMD), Threads: {threads}")
+            else:
+                logger.info(f"Режим: CPUonly, Threads: {threads}")
+            
+            cmd.append('--no-timestamps')  # Не друкувати в консоль
             
             logger.info(f"Виконання AMD CLI: {' '.join(cmd)}")
             self.update_callback(f"Транскрибація AMD GPU... {os.path.basename(audio_path)}")

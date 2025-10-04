@@ -90,6 +90,7 @@ DEFAULT_CONFIG = {
     "montage": {
         "whisper_backend": "standard",
         "whisper_model": "base",
+        "amd_whisper_use_gpu": True,
         "amd_whisper_threads": 4,
         "ffmpeg_path": "",
         "motion_enabled": True,
