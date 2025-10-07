@@ -318,7 +318,7 @@ class AudioWorkerPool:
             
             subs_path = os.path.join(subs_dir, f"subs_chunk_{item.chunk_index}.ass")
             
-            if self.app.montage_api.create_subtitles(item.audio_path, subs_path):
+            if self.app.montage_api.create_subtitles(item.audio_path, subs_path, item.lang_code):
                 return subs_path
             else:
                 logger.error(f"Помилка створення субтитрів для {item.audio_path}")

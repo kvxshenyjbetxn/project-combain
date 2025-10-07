@@ -1,5 +1,5 @@
 {
-    "ua": {
+    "uk": {
         "api_tab_label": "API",
         "audio_tab_label": "Аудіо",
         "elevenlabs_tab_label": "ElevenLabs",
@@ -197,7 +197,7 @@
         "confirm_title": "Підтвердження",
         "confirm_remove_model": "Ви впевнені, що хочете видалити модель",
         "add_language_title": "Додати мову",
-        "add_language_prompt": "Введіть код мови (наприклад, en, ua):",
+        "add_language_prompt": "Введіть код мови (наприклад, en, uk):",
         "confirm_remove_language": "Ви впевнені, що хочете видалити мову",
         "test_connection_title_or": "Тест з'єднання OpenRouter",
         "test_connection_title_poll": "Тест з'єднання Pollinations",
@@ -535,7 +535,7 @@
         "confirm_title": "Confirmation",
         "confirm_remove_model": "Are you sure you want to remove the model",
         "add_language_title": "Add Language",
-        "add_language_prompt": "Enter language code (e.g., en, ua):",
+        "add_language_prompt": "Enter language code (e.g., en, uk):",
         "confirm_remove_language": "Are you sure you want to remove the language",
         "test_connection_title_or": "OpenRouter Connection Test",
         "test_connection_title_poll": "Pollinations Connection Test",
