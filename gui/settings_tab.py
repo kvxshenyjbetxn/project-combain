@@ -742,7 +742,7 @@ def create_other_settings_tab(parent_tab, app):
     general_frame.pack(fill='x', padx=10, pady=5)
     general_frame.grid_columnconfigure(1, weight=1)
     ttk.Label(general_frame, text=app._t('language_label')).grid(row=0, column=0, sticky='w', padx=5, pady=5)
-    app.language_var = tk.StringVar(value="Українська" if app.lang == "ua" else "English")
+    app.language_var = tk.StringVar(value="Українська" if app.lang == "uk" else "English")
     lang_combo = ttk.Combobox(general_frame, textvariable=app.language_var, values=["Українська", "English"], state="readonly")
     lang_combo.grid(row=0, column=1, sticky='ew', padx=5, pady=5)
     add_text_widget_bindings(app, lang_combo)

@@ -139,7 +139,7 @@ class TranslationApp:
         self.root = root
         self.config = config
         self.translations = load_translations()
-        self.lang = self.config.get("ui_settings", {}).get("language", "ua")
+        self.lang = self.config.get("ui_settings", {}).get("language", "uk")
         self.APP_BASE_PATH = APP_BASE_PATH # Додаємо константу як атрибут класу
         
         # Check dependencies first
@@ -147,7 +147,7 @@ class TranslationApp:
 
         self.log_context = threading.local()
         self.translations = load_translations()
-        self.lang = self.config.get("ui_settings", {}).get("language", "ua")
+        self.lang = self.config.get("ui_settings", {}).get("language", "uk")
         self.log_context = threading.local()
         self.speechify_lang_voice_map = LANG_VOICE_MAP
         
@@ -1920,7 +1920,7 @@ class TranslationApp:
 
     def change_language(self, event=None):
         selected_lang = self.language_var.get()
-        lang_code = "ua" if selected_lang == "Українська" else "en"
+        lang_code = "uk" if selected_lang == "Українська" else "en"
         self.config["ui_settings"]["language"] = lang_code
         save_config(self.config)
         messagebox.showinfo(self._t('info_title'), self._t('info_restart_required'))
