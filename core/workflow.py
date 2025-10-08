@@ -869,6 +869,35 @@ class WorkflowManager:
             images_folder = os.path.join(output_path, "images")
             os.makedirs(images_folder, exist_ok=True)
             
+            # Якщо генерація зображень вимкнена - шукаємо готові
+            if not lang_steps.get('gen_images'):
+                # Спочатку парсимо промпти щоб дізнатися скільки очікується зображень
+                expected_image_count = len(image_prompts)
+                
+                if expected_image_count > 0:
+                    # Шукаємо зображення у форматі image_001.jpg, image_002.jpg...
+                    found_images = []
+                    for i in range(1, expected_image_count + 1):
+                        img_path = os.path.join(images_folder, f"image_{i:03d}.jpg")
+                        if os.path.exists(img_path) and os.path.getsize(img_path) > 0:
+                            found_images.append(img_path)
+                    
+                    MIN_IMAGES_REQUIRED = 5
+                    
+                    if len(found_images) >= MIN_IMAGES_REQUIRED:
+                        if len(found_images) == expected_image_count:
+                            logger.info(f"[Workflow] Знайдено всі {expected_image_count} готових зображень для {lang_code}. Генерація зображень пропущена.")
+                        else:
+                            missing_indices = [i for i in range(1, expected_image_count + 1) 
+                                             if not os.path.exists(os.path.join(images_folder, f"image_{i:03d}.jpg"))]
+                            logger.info(f"[Workflow] Знайдено {len(found_images)}/{expected_image_count} зображень для {lang_code}. "
+                                      f"Відсутні індекси: {missing_indices}. Продовжуємо роботу (мінімум {MIN_IMAGES_REQUIRED} є).")
+                    else:
+                        logger.warning(f"[Workflow] Етап 'gen_images' вимкнено для {lang_code}, але знайдено тільки {len(found_images)} зображень. "
+                                     f"Потрібно мінімум {MIN_IMAGES_REQUIRED} для продовження роботи!")
+                else:
+                    logger.warning(f"[Workflow] Етап 'gen_images' вимкнено для {lang_code}, але файл промптів не знайдено або порожній.")
+            
             if status_key in app.task_completion_status:
                 app.task_completion_status[status_key]["total_images"] = len(image_prompts)
             app.root.after(0, app.update_task_status_display)
@@ -1337,22 +1366,45 @@ class WorkflowManager:
                 found_subs_chunks = []
 
                 if not steps.get('audio'):
-                    expected_audio_files = [os.path.join(temp_dir, "audio_chunks", f"merged_chunk_{i}.mp3") if os.path.exists(os.path.join(temp_dir, "audio_chunks")) else os.path.join(temp_dir, f"audio_chunk_{i}.mp3") for i in range(num_parallel_chunks)]
-                    if all(os.path.exists(p) for p in expected_audio_files):
-                        found_audio_chunks = expected_audio_files
-                        logger.info(f"Знайдено існуючі аудіо-чанки для {task_key}. Генерація аудіо пропущена.")
-                        if status_key in self.app.task_completion_status: self.app.task_completion_status[status_key]['steps'][self.app._t('step_name_audio')] = "Знайдено"
+                    # Визначаємо формат залежно від TTS сервісу
+                    lang_config = self.config["languages"][lang_code]
+                    tts_service = lang_config.get("tts_service", "elevenlabs")
+                    
+                    if tts_service == "voicemaker":
+                        # Шукаємо merged_chunk_*
+                        expected_audio_files = [os.path.join(temp_dir, "audio_chunks", f"merged_chunk_{i}.mp3") 
+                                               for i in range(num_parallel_chunks)]
                     else:
-                        logger.warning(f"Етап 'audio' вимкнено, але не знайдено готові файли для {task_key}.")
+                        # Шукаємо chunk_*
+                        expected_audio_files = [os.path.join(temp_dir, "audio_chunks", f"chunk_{i}.mp3") 
+                                               for i in range(num_parallel_chunks)]
+                    
+                    found_audio = [p for p in expected_audio_files if os.path.exists(p)]
+                    
+                    if len(found_audio) == num_parallel_chunks:
+                        found_audio_chunks = expected_audio_files
+                        logger.info(f"Знайдено всі {num_parallel_chunks} існуючих аудіо-чанків для {task_key} ({tts_service}). Генерація аудіо пропущена.")
+                        if status_key in self.app.task_completion_status: 
+                            self.app.task_completion_status[status_key]['steps'][self.app._t('step_name_audio')] = "Знайдено"
+                    else:
+                        missing_indices = [i for i in range(num_parallel_chunks) if expected_audio_files[i] not in found_audio]
+                        logger.warning(f"Етап 'audio' вимкнено для {task_key}, але не знайдено всі файли ({tts_service}). "
+                                      f"Знайдено: {len(found_audio)}/{num_parallel_chunks}. Відсутні індекси: {missing_indices}")
 
                 if not steps.get('create_subtitles'):
-                    expected_subs_files = [os.path.join(temp_dir, "subs", f"subs_chunk_{i}.ass") for i in range(num_parallel_chunks)]
-                    if all(os.path.exists(p) for p in expected_subs_files):
+                    expected_subs_files = [os.path.join(temp_dir, "subs", f"subs_chunk_{i}.ass") 
+                                          for i in range(num_parallel_chunks)]
+                    found_subs = [p for p in expected_subs_files if os.path.exists(p)]
+                    
+                    if len(found_subs) == num_parallel_chunks:
                         found_subs_chunks = expected_subs_files
-                        logger.info(f"Знайдено існуючі чанки субтитрів для {task_key}. Створення субтитрів пропущено.")
-                        if status_key in self.app.task_completion_status: self.app.task_completion_status[status_key]['steps'][self.app._t('step_name_create_subtitles')] = "Знайдено"
+                        logger.info(f"Знайдено всі {num_parallel_chunks} існуючих чанків субтитрів для {task_key}. Створення субтитрів пропущено.")
+                        if status_key in self.app.task_completion_status: 
+                            self.app.task_completion_status[status_key]['steps'][self.app._t('step_name_create_subtitles')] = "Знайдено"
                     else:
-                        logger.warning(f"Етап 'create_subtitles' вимкнено, але не знайдено готові файли для {task_key}.")
+                        missing_indices = [i for i in range(num_parallel_chunks) if expected_subs_files[i] not in found_subs]
+                        logger.warning(f"Етап 'create_subtitles' вимкнено для {task_key}, але не знайдено всі файли. "
+                                      f"Знайдено: {len(found_subs)}/{num_parallel_chunks}. Відсутні індекси: {missing_indices}")
                 
                 if found_audio_chunks and (found_subs_chunks or not steps.get('create_subtitles')):
                     data['audio_chunks'] = found_audio_chunks

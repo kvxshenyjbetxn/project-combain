@@ -1248,6 +1248,39 @@ class TranslationApp:
         
         if not self._check_app_state(): return
         audio_file_path = os.path.join(lang_output_path, "audio.mp3")
+        
+        # Отримуємо кількість потоків з конфігу
+        num_chunks = self.config.get('parallel_processing', {}).get('num_chunks', 3)
+        temp_dir = os.path.join(lang_output_path, "temp_chunks")
+        audio_chunks_dir = os.path.join(temp_dir, "audio_chunks")
+        
+        # Якщо аудіо вимкнено - шукаємо готові файли
+        if not lang_steps.get('audio'):
+            tts_service = lang_config.get("tts_service", "elevenlabs")
+            expected_audio = []
+            
+            # Визначаємо формат файлів залежно від TTS сервісу
+            if tts_service == "voicemaker":
+                # VoiceMaker зберігає як merged_chunk_*
+                expected_audio = [os.path.join(audio_chunks_dir, f"merged_chunk_{i}.mp3") 
+                                for i in range(num_chunks)]
+            else:
+                # ElevenLabs/Speechify зберігають як chunk_*
+                expected_audio = [os.path.join(audio_chunks_dir, f"chunk_{i}.mp3") 
+                                for i in range(num_chunks)]
+            
+            # Перевіряємо чи всі файли існують
+            found_audio = [p for p in expected_audio if os.path.exists(p)]
+            
+            if len(found_audio) == num_chunks:
+                logger.info(f"[Chain] Знайдено всі {num_chunks} готових аудіо-чанків для {lang_name} ({tts_service}). Генерація аудіо пропущена.")
+                # Зберігаємо для подальшої роботи
+                audio_file_path = found_audio[0]  # Або об'єднаний файл якщо потрібен
+            else:
+                missing_indices = [i for i in range(num_chunks) if expected_audio[i] not in found_audio]
+                logger.warning(f"[Chain] Етап 'audio' вимкнено, але не знайдено всі файли для {lang_name}. "
+                              f"Знайдено: {len(found_audio)}/{num_chunks}. Відсутні індекси: {missing_indices}")
+        
         if lang_steps.get('audio'):
             progress_text = f"Завд.{task_num}/{total_tasks} | {lang_name} - {self._t('step_audio')}..."
             self.update_progress(progress_text)
@@ -1328,6 +1361,23 @@ class TranslationApp:
 
         if not self._check_app_state(): return
         subs_file_path = os.path.join(lang_output_path, "subtitles.ass")
+        
+        # Якщо субтитри вимкнені - шукаємо готові файли
+        if not lang_steps.get('create_subtitles'):
+            subs_dir = os.path.join(temp_dir, "subs")
+            expected_subs = [os.path.join(subs_dir, f"subs_chunk_{i}.ass") 
+                            for i in range(num_chunks)]
+            
+            found_subs = [p for p in expected_subs if os.path.exists(p)]
+            
+            if len(found_subs) == num_chunks:
+                logger.info(f"[Chain] Знайдено всі {num_chunks} готових файлів субтитрів для {lang_name}. Створення субтитрів пропущено.")
+                subs_file_path = found_subs[0]  # Для подальшої роботи
+            else:
+                missing_indices = [i for i in range(num_chunks) if expected_subs[i] not in found_subs]
+                logger.warning(f"[Chain] Етап 'create_subtitles' вимкнено, але не знайдено всі файли для {lang_name}. "
+                              f"Знайдено: {len(found_subs)}/{num_chunks}. Відсутні індекси: {missing_indices}")
+        
         if lang_steps.get('create_subtitles'):
             progress_text = f"Завд.{task_num}/{total_tasks} | {lang_name} - {self._t('step_create_subtitles')}..."
             self.update_progress(progress_text)
