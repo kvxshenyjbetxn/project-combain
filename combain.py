@@ -938,15 +938,33 @@ class TranslationApp:
         if not hasattr(self, 'queue_tree'):
             return
 
-        # Незалежно від параметрів, ми просто викликаємо повне оновлення
-        # відображення черги, оскільки це найнадійніший спосіб.
+        # Дебаунсинг механізм для запобігання надто частих оновлень UI
+        if not hasattr(self, '_update_scheduled'):
+            self._update_scheduled = False
+        
+        if not hasattr(self, '_update_timer_id'):
+            self._update_timer_id = None
+            
         try:
-            # Оновлюємо відображення після короткої затримки, щоб уникнути зависання UI
-            self.root.after(100, self.update_queue_display)
+            # Якщо вже є запланована затримка, скасуємо її
+            if self._update_timer_id is not None:
+                try:
+                    self.root.after_cancel(self._update_timer_id)
+                except:
+                    pass
+            
+            # Плануємо нове оновлення з коротшою затримкою для швидкого відгуку
+            self._update_timer_id = self.root.after(50, self._do_update_queue_display)
         except Exception as e:
             # Ігноруємо помилки, якщо GUI недоступний під час закриття
             if "invalid command name" not in str(e):
-                 logger.warning(f"Помилка під час планування оновлення GUI: {e}")
+                logger.warning(f"Помилка під час планування оновлення GUI: {e}")
+
+    def _do_update_queue_display(self):
+        """Внутрішня функція для виконання оновлення черги з дебаунсингом."""
+        self._update_timer_id = None
+        self._update_scheduled = False
+        self.update_queue_display()
 
 
     def update_rewrite_task_status_display(self, task_index=None, lang_code=None, step_key=None, status=None):
@@ -1831,14 +1849,33 @@ class TranslationApp:
             error_label.pack(pady=5, side='top', expand=True, fill='both')
         else:
             try:
+                # Невелика затримка для файлової системи, щоб файл був записаний повністю
+                time.sleep(0.3)
+                
+                # Примусово очищуємо кеш PIL для цього файлу
+                from PIL import ImageFile
+                ImageFile.LOAD_TRUNCATED_IMAGES = True
+                
+                # Відкриваємо зображення з примусовим перезавантаженням
                 img = Image.open(image_path)
+                img.load()  # Примусово завантажуємо дані зображення
                 img.thumbnail((256, 144))
                 photo = ImageTk.PhotoImage(img)
                 
-                # Зберігаємо посилання на фото, щоб його не видалив збирач сміття
+                # Додаємо фото до глобального списку посилань для запобігання видалення збирачем сміття
+                if hasattr(self, 'gallery_photo_references'):
+                    # Видаляємо старе посилання на це зображення, якщо воно є
+                    self.gallery_photo_references = [ref for ref in self.gallery_photo_references 
+                                                     if not (hasattr(ref, '_PhotoImage__photo') and 
+                                                            hasattr(ref, 'width') and ref.width() == photo.width())]
+                    self.gallery_photo_references.append(photo)
+                
+                # Зберігаємо посилання на фото в самому віджеті
                 img_label = ttk.Label(frame, image=photo)
                 img_label.image = photo 
                 img_label.pack(pady=5, side='top', expand=True, fill='both')
+                
+                logger.info(f"Gallery image updated successfully: {os.path.basename(image_path)}")
             except Exception as e:
                 logger.error(f"Could not reload image {image_path}: {e}")
                 error_label = ttk.Label(frame, text=self._t('error_loading_label_text'))

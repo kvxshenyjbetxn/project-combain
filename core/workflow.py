@@ -1097,6 +1097,60 @@ class WorkflowManager:
             
             # Запуск пакетної генерації
             self.googler_api.generate_images_batch(prompts_with_paths, on_image_complete=on_image_complete)
+            
+            # Перевіряємо які зображення не були згенеровані та робимо повторні спроби
+            missing_images = []
+            for i, prompt in enumerate(prompts):
+                image_path = os.path.join(images_folder, f"image_{i+1:03d}.jpg")
+                if not os.path.exists(image_path) or os.path.getsize(image_path) == 0:
+                    missing_images.append((i, prompt, image_path))
+            
+            if missing_images:
+                logger.warning(f"[Googler] {len(missing_images)} зображень не було згенеровано. Починаємо повторні спроби...")
+                max_retry_attempts = 3
+                
+                for retry_attempt in range(max_retry_attempts):
+                    if not missing_images or not self.app._check_app_state():
+                        break
+                    
+                    logger.info(f"[Googler] Спроба {retry_attempt + 1}/{max_retry_attempts} для {len(missing_images)} відсутніх зображень")
+                    
+                    # Робимо паузу між спробами
+                    if retry_attempt > 0:
+                        time.sleep(5)
+                    
+                    successfully_generated = []
+                    for idx, prompt, image_path in missing_images:
+                        if not self.app._check_app_state():
+                            break
+                        
+                        progress_text = f"Завд.{task_num}/{total_tasks} | {lang_name} - [Googler] Перегенерація {idx+1}/{len(prompts)} (спроба {retry_attempt + 1})..."
+                        self.app.update_progress(progress_text, queue_type=queue_type)
+                        
+                        # Індивідуальна генерація для відсутнього зображення
+                        success = self.googler_api.generate_image(prompt, image_path)
+                        
+                        if success and os.path.exists(image_path) and os.path.getsize(image_path) > 0:
+                            logger.info(f"[Googler] Успішно згенеровано зображення {idx+1} на спробі {retry_attempt + 1}")
+                            successfully_generated.append((idx, prompt, image_path))
+                            
+                            # Виконуємо callback для цього зображення
+                            on_image_complete(idx, True, image_path)
+                    
+                    # Видаляємо успішно згенеровані зображення зі списку відсутніх
+                    missing_images = [img for img in missing_images if img not in successfully_generated]
+                    
+                    if not missing_images:
+                        logger.info(f"[Googler] Всі відсутні зображення успішно згенеровані на спробі {retry_attempt + 1}")
+                        break
+                
+                if missing_images:
+                    logger.error(f"[Googler] Не вдалося згенерувати {len(missing_images)} зображень після {max_retry_attempts} спроб:")
+                    for idx, prompt, path in missing_images:
+                        logger.error(f"  - Зображення {idx+1}: {os.path.basename(path)}")
+            else:
+                logger.info(f"[Googler] Всі {len(prompts)} зображень успішно згенеровані з першої спроби")
+            
             return True
         
         # СТАНДАРТНА ЛОГІКА ДЛЯ POLLINATIONS ТА RECRAFT - ПО ОДНОМУ
