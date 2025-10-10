@@ -1379,39 +1379,75 @@ class WorkflowManager:
                         expected_audio_files = [os.path.join(temp_dir, "audio_chunks", f"chunk_{i}.mp3") 
                                                for i in range(num_parallel_chunks)]
                     
-                    found_audio = [p for p in expected_audio_files if os.path.exists(p)]
+                    found_audio = [p for p in expected_audio_files if os.path.exists(p) and os.path.getsize(p) > 0]
                     
                     if len(found_audio) == num_parallel_chunks:
                         found_audio_chunks = expected_audio_files
-                        logger.info(f"Знайдено всі {num_parallel_chunks} існуючих аудіо-чанків для {task_key} ({tts_service}). Генерація аудіо пропущена.")
+                        logger.info(f"✓ Знайдено всі {num_parallel_chunks} існуючих аудіо-чанків для {task_key} ({tts_service}). Генерація аудіо пропущена.")
                         if status_key in self.app.task_completion_status: 
                             self.app.task_completion_status[status_key]['steps'][self.app._t('step_name_audio')] = "Знайдено"
-                    else:
+                    elif len(found_audio) > 0:
+                        # ВИПРАВЛЕННЯ: Використовуємо те що є
+                        found_audio_chunks = found_audio
                         missing_indices = [i for i in range(num_parallel_chunks) if expected_audio_files[i] not in found_audio]
-                        logger.warning(f"Етап 'audio' вимкнено для {task_key}, але не знайдено всі файли ({tts_service}). "
-                                      f"Знайдено: {len(found_audio)}/{num_parallel_chunks}. Відсутні індекси: {missing_indices}")
+                        logger.warning(f"⚠ Етап 'audio' вимкнено для {task_key}. Знайдено тільки {len(found_audio)}/{num_parallel_chunks} аудіо-файлів ({tts_service}). "
+                                      f"Відсутні індекси: {missing_indices}. ВИКОРИСТОВУЄМО ТЕ ЩО Є ДЛЯ МОНТАЖУ!")
+                        if status_key in self.app.task_completion_status: 
+                            self.app.task_completion_status[status_key]['steps'][self.app._t('step_name_audio')] = f"Часткові ({len(found_audio)}/{num_parallel_chunks})"
+                    else:
+                        logger.error(f"✗ КРИТИЧНА ПОМИЛКА: Етап 'audio' вимкнено для {task_key}, але НЕ ЗНАЙДЕНО ЖОДНОГО аудіо-файлу! "
+                                   f"Очікувалось: {num_parallel_chunks} файлів у {os.path.join(temp_dir, 'audio_chunks')}. "
+                                   f"Монтаж НЕМОЖЛИВИЙ без аудіо!")
+                        if status_key in self.app.task_completion_status: 
+                            self.app.task_completion_status[status_key]['steps'][self.app._t('step_name_audio')] = "❌ Відсутні"
 
                 if not steps.get('create_subtitles'):
                     expected_subs_files = [os.path.join(temp_dir, "subs", f"subs_chunk_{i}.ass") 
                                           for i in range(num_parallel_chunks)]
-                    found_subs = [p for p in expected_subs_files if os.path.exists(p)]
+                    found_subs = [p for p in expected_subs_files if os.path.exists(p) and os.path.getsize(p) > 0]
                     
                     if len(found_subs) == num_parallel_chunks:
                         found_subs_chunks = expected_subs_files
-                        logger.info(f"Знайдено всі {num_parallel_chunks} існуючих чанків субтитрів для {task_key}. Створення субтитрів пропущено.")
+                        logger.info(f"✓ Знайдено всі {num_parallel_chunks} існуючих чанків субтитрів для {task_key}. Створення субтитрів пропущено.")
                         if status_key in self.app.task_completion_status: 
                             self.app.task_completion_status[status_key]['steps'][self.app._t('step_name_create_subtitles')] = "Знайдено"
-                    else:
+                    elif len(found_subs) > 0:
+                        # ВИПРАВЛЕННЯ: Використовуємо те що є
+                        found_subs_chunks = found_subs
                         missing_indices = [i for i in range(num_parallel_chunks) if expected_subs_files[i] not in found_subs]
-                        logger.warning(f"Етап 'create_subtitles' вимкнено для {task_key}, але не знайдено всі файли. "
-                                      f"Знайдено: {len(found_subs)}/{num_parallel_chunks}. Відсутні індекси: {missing_indices}")
+                        logger.warning(f"⚠ Етап 'create_subtitles' вимкнено для {task_key}. Знайдено тільки {len(found_subs)}/{num_parallel_chunks} файлів субтитрів. "
+                                      f"Відсутні індекси: {missing_indices}. ВИКОРИСТОВУЄМО ТЕ ЩО Є ДЛЯ МОНТАЖУ!")
+                        if status_key in self.app.task_completion_status: 
+                            self.app.task_completion_status[status_key]['steps'][self.app._t('step_name_create_subtitles')] = f"Часткові ({len(found_subs)}/{num_parallel_chunks})"
+                    else:
+                        logger.error(f"✗ КРИТИЧНА ПОМИЛКА: Етап 'create_subtitles' вимкнено для {task_key}, але НЕ ЗНАЙДЕНО ЖОДНОГО файлу субтитрів! "
+                                   f"Очікувалось: {num_parallel_chunks} файлів у {os.path.join(temp_dir, 'subs')}. "
+                                   f"Монтаж НЕМОЖЛИВИЙ без субтитрів!")
+                        if status_key in self.app.task_completion_status: 
+                            self.app.task_completion_status[status_key]['steps'][self.app._t('step_name_create_subtitles')] = "❌ Відсутні"
                 
+                # ВИПРАВЛЕННЯ: Перевіряємо що є хоча б мінімум для монтажу
                 if found_audio_chunks and (found_subs_chunks or not steps.get('create_subtitles')):
+                    # Вирівнюємо довжини якщо потрібно (якщо субтитри не потрібні)
+                    if not found_subs_chunks:
+                        found_subs_chunks = [None] * len(found_audio_chunks)
+                    elif len(found_audio_chunks) != len(found_subs_chunks):
+                        # Якщо кількість не співпадає, вирівнюємо до меншої
+                        min_len = min(len(found_audio_chunks), len(found_subs_chunks))
+                        logger.warning(f"⚠ Кількість аудіо ({len(found_audio_chunks)}) та субтитрів ({len(found_subs_chunks)}) не співпадає для {task_key}. "
+                                     f"Використовуємо перші {min_len} пар для монтажу.")
+                        found_audio_chunks = found_audio_chunks[:min_len]
+                        found_subs_chunks = found_subs_chunks[:min_len]
+                    
                     data['audio_chunks'] = found_audio_chunks
-                    data['subs_chunks'] = found_subs_chunks if found_subs_chunks else [None] * len(found_audio_chunks)
+                    data['subs_chunks'] = found_subs_chunks
+                    logger.info(f"✓ Підготовлено {len(found_audio_chunks)} пар аудіо+субтитри для монтажу {task_key}")
                     continue
 
-                if not steps.get('audio'): continue
+                # Якщо етап аудіо вимкнено але файлів не знайдено - пропускаємо
+                if not steps.get('audio'):
+                    logger.error(f"✗ Пропускаємо завдання {task_key}: етап 'audio' вимкнено, але не знайдено готових файлів!")
+                    continue
 
                 lang_config = self.config["languages"][lang_code]
                 tts_service = lang_config.get("tts_service", "elevenlabs")
