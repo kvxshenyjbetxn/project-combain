@@ -440,9 +440,10 @@ class WorkflowManager:
             image_chunks = np.array_split(all_images, len(data['audio_chunks']))
             video_chunk_paths = []
             num_montage_threads = self.config.get('parallel_processing', {}).get('num_chunks', 3)
+            os.makedirs(os.path.join(data['temp_dir'], "video"), exist_ok=True)
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=num_montage_threads) as executor:
-                video_futures = {executor.submit(self._video_chunk_worker, self.app, list(image_chunks[i]), data['audio_chunks'][i], data['subs_chunks'][i], os.path.join(data['temp_dir'], f"video_chunk_{i:02d}.mp4"), i + 1, len(data['audio_chunks']), task_key): i for i in range(len(data['audio_chunks']))}
+                video_futures = {executor.submit(self._video_chunk_worker, self.app, list(image_chunks[i]), data['audio_chunks'][i], data['subs_chunks'][i], os.path.join(data['temp_dir'], "video", f"video_chunk_{i:02d}.mp4"), i + 1, len(data['audio_chunks']), task_key): i for i in range(len(data['audio_chunks']))}
                 
                 video_results = {}
                 for f in concurrent.futures.as_completed(video_futures):
@@ -717,9 +718,10 @@ class WorkflowManager:
                 image_chunks = np.array_split(all_images, len(data['audio_chunks']))
                 video_chunk_paths = []
                 num_montage_threads = self.config.get('parallel_processing', {}).get('num_chunks', 3)
+                os.makedirs(os.path.join(data['temp_dir'], "video"), exist_ok=True)
 
                 with concurrent.futures.ThreadPoolExecutor(max_workers=num_montage_threads) as executor:
-                    video_futures = {executor.submit(self._video_chunk_worker, self.app, list(image_chunks[i]), data['audio_chunks'][i], data['subs_chunks'][i], os.path.join(data['temp_dir'], f"video_chunk_{i:02d}.mp4"), i + 1, len(data['audio_chunks']), task_key): i for i in range(len(data['audio_chunks']))}
+                    video_futures = {executor.submit(self._video_chunk_worker, self.app, list(image_chunks[i]), data['audio_chunks'][i], data['subs_chunks'][i], os.path.join(data['temp_dir'], "video", f"video_chunk_{i:02d}.mp4"), i + 1, len(data['audio_chunks']), task_key): i for i in range(len(data['audio_chunks']))}
                     
                     video_results = {}
                     for f in concurrent.futures.as_completed(video_futures):
@@ -1358,7 +1360,7 @@ class WorkflowManager:
                 task_idx_str, lang_code = task_key
                 steps = data['task']['steps'][lang_code]
                 status_key = self._get_status_key(task_idx_str, lang_code, is_rewrite)
-                temp_dir = os.path.join(data['text_results']['output_path'], "temp_chunks")
+                temp_dir = os.path.join(data['text_results']['output_path'], "temp")
                 os.makedirs(temp_dir, exist_ok=True)
                 data['temp_dir'] = temp_dir
                 
@@ -1371,12 +1373,12 @@ class WorkflowManager:
                     tts_service = lang_config.get("tts_service", "elevenlabs")
                     
                     if tts_service == "voicemaker":
-                        # Шукаємо merged_chunk_*
-                        expected_audio_files = [os.path.join(temp_dir, "audio_chunks", f"merged_chunk_{i}.mp3") 
+                        # Шукаємо merged_audio_*
+                        expected_audio_files = [os.path.join(temp_dir, "audio", f"merged_audio_{i:02d}.mp3") 
                                                for i in range(num_parallel_chunks)]
                     else:
-                        # Шукаємо chunk_*
-                        expected_audio_files = [os.path.join(temp_dir, "audio_chunks", f"chunk_{i}.mp3") 
+                        # Шукаємо audio_*
+                        expected_audio_files = [os.path.join(temp_dir, "audio", f"audio_{i:02d}.mp3") 
                                                for i in range(num_parallel_chunks)]
                     
                     found_audio = [p for p in expected_audio_files if os.path.exists(p) and os.path.getsize(p) > 0]
@@ -1396,13 +1398,13 @@ class WorkflowManager:
                             self.app.task_completion_status[status_key]['steps'][self.app._t('step_name_audio')] = f"Часткові ({len(found_audio)}/{num_parallel_chunks})"
                     else:
                         logger.error(f"✗ КРИТИЧНА ПОМИЛКА: Етап 'audio' вимкнено для {task_key}, але НЕ ЗНАЙДЕНО ЖОДНОГО аудіо-файлу! "
-                                   f"Очікувалось: {num_parallel_chunks} файлів у {os.path.join(temp_dir, 'audio_chunks')}. "
+                                   f"Очікувалось: {num_parallel_chunks} файлів у {os.path.join(temp_dir, 'audio')}. "
                                    f"Монтаж НЕМОЖЛИВИЙ без аудіо!")
                         if status_key in self.app.task_completion_status: 
                             self.app.task_completion_status[status_key]['steps'][self.app._t('step_name_audio')] = "❌ Відсутні"
 
                 if not steps.get('create_subtitles'):
-                    expected_subs_files = [os.path.join(temp_dir, "subs", f"subs_chunk_{i}.ass") 
+                    expected_subs_files = [os.path.join(temp_dir, "subs", f"subs_chunk_{i:02d}.ass") 
                                           for i in range(num_parallel_chunks)]
                     found_subs = [p for p in expected_subs_files if os.path.exists(p) and os.path.getsize(p) > 0]
                     
@@ -1483,12 +1485,12 @@ class WorkflowManager:
 
                 audio_items = [
                     AudioPipelineItem(
-                        text_chunk=chunk, output_path=os.path.join(temp_dir, "audio_chunks", f"chunk_{i}.mp3"),
+                        text_chunk=chunk, output_path=os.path.join(temp_dir, "audio", f"audio_{i:02d}.mp3"),
                         lang_config=lang_config, lang_code=lang_code, chunk_index=i,
                         total_chunks=len(text_chunks), task_key=str(task_key)
                     ) for i, chunk in enumerate(text_chunks)
                 ]
-                os.makedirs(os.path.join(temp_dir, "audio_chunks"), exist_ok=True)
+                os.makedirs(os.path.join(temp_dir, "audio"), exist_ok=True)
 
 
                 if tts_service == "voicemaker":
@@ -1514,12 +1516,12 @@ class WorkflowManager:
 
                 vm_items_for_task = [
                     AudioPipelineItem(
-                        text_chunk=chunk, output_path=os.path.join(task_data['temp_dir'], "audio_chunks", f"chunk_{i}.mp3"),
+                        text_chunk=chunk, output_path=os.path.join(task_data['temp_dir'], "audio", f"audio_{i:02d}.mp3"),
                         lang_config=self.config["languages"][eval(task_key)[1]], lang_code=eval(task_key)[1], 
                         chunk_index=i, total_chunks=len(vm_text_chunks), task_key=task_key
                     ) for i, chunk in enumerate(vm_text_chunks)
                 ]
-                os.makedirs(os.path.join(task_data['temp_dir'], "audio_chunks"), exist_ok=True)
+                os.makedirs(os.path.join(task_data['temp_dir'], "audio"), exist_ok=True)
 
                 logger.info(f"Початок послідовної обробки Voicemaker для {task_key} ({len(vm_items_for_task)} чанків)...")
                 self.audio_worker_pool.submit_voicemaker_tasks_async(vm_items_for_task)
@@ -1667,7 +1669,7 @@ class WorkflowManager:
             if not group_list: 
                 continue
                 
-            merged_path = os.path.join(task_info['data']['temp_dir'], f"merged_chunk_{i}.mp3")
+            merged_path = os.path.join(task_info['data']['temp_dir'], "audio", f"merged_audio_{i:02d}.mp3")
             
             if len(group_list) > 1:
                 if not concatenate_audio_files(group_list, merged_path): 

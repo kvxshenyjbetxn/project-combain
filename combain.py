@@ -1251,8 +1251,8 @@ class TranslationApp:
         
         # Отримуємо кількість потоків з конфігу
         num_chunks = self.config.get('parallel_processing', {}).get('num_chunks', 3)
-        temp_dir = os.path.join(lang_output_path, "temp_chunks")
-        audio_chunks_dir = os.path.join(temp_dir, "audio_chunks")
+        temp_dir = os.path.join(lang_output_path, "temp")
+        audio_chunks_dir = os.path.join(temp_dir, "audio")
         
         # Якщо аудіо вимкнено - шукаємо готові файли
         if not lang_steps.get('audio'):
@@ -1261,12 +1261,12 @@ class TranslationApp:
             
             # Визначаємо формат файлів залежно від TTS сервісу
             if tts_service == "voicemaker":
-                # VoiceMaker зберігає як merged_chunk_*
-                expected_audio = [os.path.join(audio_chunks_dir, f"merged_chunk_{i}.mp3") 
+                # VoiceMaker зберігає як merged_audio_*
+                expected_audio = [os.path.join(audio_chunks_dir, f"merged_audio_{i:02d}.mp3") 
                                 for i in range(num_chunks)]
             else:
-                # ElevenLabs/Speechify зберігають як chunk_*
-                expected_audio = [os.path.join(audio_chunks_dir, f"chunk_{i}.mp3") 
+                # ElevenLabs/Speechify зберігають як audio_*
+                expected_audio = [os.path.join(audio_chunks_dir, f"audio_{i:02d}.mp3") 
                                 for i in range(num_chunks)]
             
             # Перевіряємо чи всі файли існують
@@ -1311,7 +1311,7 @@ class TranslationApp:
                     logger.info(f"Text is too long for Voicemaker ({len(text_to_process)} chars). Splitting into chunks.")
                     text_chunks = chunk_text_voicemaker(text_to_process, voicemaker_limit)
                     audio_chunks = []
-                    temp_audio_dir = os.path.join(lang_output_path, "temp_audio_chunks")
+                    temp_audio_dir = os.path.join(lang_output_path, "temp", "audio")
                     os.makedirs(temp_audio_dir, exist_ok=True)
                     
                     try:
@@ -1320,7 +1320,7 @@ class TranslationApp:
                                 executor.submit(
                                     self.vm_api.generate_audio,
                                     chunk, lang_config.get("voicemaker_voice_id"), lang_config.get("voicemaker_engine"),
-                                    lang_code, os.path.join(temp_audio_dir, f"chunk_{i}.mp3")
+                                    lang_code, os.path.join(temp_audio_dir, f"audio_{i:02d}.mp3")
                                 ): i for i, chunk in enumerate(text_chunks)
                             }
                             
@@ -1328,7 +1328,7 @@ class TranslationApp:
                             for future in concurrent.futures.as_completed(future_to_index):
                                 index = future_to_index[future]
                                 if future.result():
-                                    results[index] = os.path.join(temp_audio_dir, f"chunk_{index}.mp3")
+                                    results[index] = os.path.join(temp_audio_dir, f"audio_{index:02d}.mp3")
                         
                         audio_chunks = [r for r in results if r is not None and os.path.exists(r)]
                         if len(audio_chunks) == len(text_chunks):
@@ -1341,8 +1341,7 @@ class TranslationApp:
                             logger.error(f"[Chain] Failed to generate all Voicemaker audio chunks. Got {len(audio_chunks)} of {len(text_chunks)}.")
 
                     finally:
-                        if os.path.exists(temp_audio_dir):
-                            shutil.rmtree(temp_audio_dir)
+                        pass  # Не видаляємо папку, вона постійна
                 else:
                     success, new_balance = self.vm_api.generate_audio(text_to_process, lang_config.get("voicemaker_voice_id"), lang_config.get("voicemaker_engine"), lang_code, audio_file_path)
                 if success:
@@ -1365,7 +1364,7 @@ class TranslationApp:
         # Якщо субтитри вимкнені - шукаємо готові файли
         if not lang_steps.get('create_subtitles'):
             subs_dir = os.path.join(temp_dir, "subs")
-            expected_subs = [os.path.join(subs_dir, f"subs_chunk_{i}.ass") 
+            expected_subs = [os.path.join(subs_dir, f"subs_chunk_{i:02d}.ass") 
                             for i in range(num_chunks)]
             
             found_subs = [p for p in expected_subs if os.path.exists(p)]
@@ -1440,9 +1439,9 @@ class TranslationApp:
             self.root.after(0, lambda: self.progress_var.set(progress_percent))
     
     def update_progress_for_montage(self, message, task_key=None, chunk_index=None, progress=None):
-        logger.info(f"[Montage Progress] {message}")
+        logger.info(f"{message}")
         if task_key and chunk_index is not None and progress is not None:
-            logger.debug(f"[Montage Progress] Updating task_key={task_key}, chunk={chunk_index}, progress={progress}")
+            logger.debug(f"Updating task_key={task_key}, chunk={chunk_index}, progress={progress}")
             with self.video_progress_lock:
                 if task_key not in self.video_chunk_progress:
                     self.video_chunk_progress[task_key] = {}
@@ -1453,7 +1452,7 @@ class TranslationApp:
                 num_active_chunks = len(self.video_chunk_progress[task_key])
                 average_progress = total_progress / num_active_chunks if num_active_chunks > 0 else 0
                 
-                logger.debug(f"[Montage Progress] Average progress for {task_key}: {average_progress:.1f}%")
+                logger.debug(f"Average progress for {task_key}: {average_progress:.1f}%")
                 
                 # Оновлення статусу в task_completion_status
                 task_index, lang_code = task_key
@@ -1465,14 +1464,14 @@ class TranslationApp:
                 status_key_prefix = "rewrite_" if is_rewrite else ""
                 status_key = f"{status_key_prefix}{task_index}_{lang_code}"
                 
-                logger.debug(f"[Montage Progress] Using status_key: {status_key}, is_rewrite: {is_rewrite}")
+                logger.debug(f"Using status_key: {status_key}, is_rewrite: {is_rewrite}")
                 
                 if status_key in self.task_completion_status:
                     self.task_completion_status[status_key]['video_progress'] = average_progress
                     # Статус буде оновлений через періодичний update (кожні 5 секунд)
                     # Не викликаємо update_task_status_display тут для уникнення частих оновлень
                 else:
-                    logger.warning(f"[Montage Progress] Status key {status_key} not found in task_completion_status")
+                    logger.warning(f"Status key {status_key} not found in task_completion_status")
 
 # Test connection methods
     def test_openrouter_connection(self):
@@ -2436,7 +2435,7 @@ class TranslationApp:
         Залишений для сумісності зі старими частинами коду.
         """
         tts_service = lang_config.get("tts_service", "elevenlabs")
-        temp_audio_dir = os.path.join(temp_dir, "audio_chunks")
+        temp_audio_dir = os.path.join(temp_dir, "audio")
         os.makedirs(temp_audio_dir, exist_ok=True)
         logger.info(f"Preparing audio chunks for {lang_code} using {tts_service}...")
 
@@ -2458,7 +2457,7 @@ class TranslationApp:
         
         # Заглушка: використовуємо простий спосіб без воркер пулу для старої логіки
         for i, chunk in enumerate(text_chunks):
-            output_path = os.path.join(temp_audio_dir, f"chunk_{i}.mp3")
+            output_path = os.path.join(temp_audio_dir, f"audio_{i:02d}.mp3")
             success = self._generate_single_audio_chunk(chunk, output_path, lang_config, lang_code)
             if success:
                 audio_chunks_paths.append(output_path)
@@ -2475,7 +2474,7 @@ class TranslationApp:
             for i in range(0, len(audio_chunks_paths), chunk_size):
                 chunk_to_merge = audio_chunks_paths[i:i + chunk_size]
                 if len(chunk_to_merge) > 1:
-                    output_file = os.path.join(temp_audio_dir, f"merged_chunk_{len(final_audio_chunks)}.mp3")
+                    output_file = os.path.join(temp_audio_dir, f"merged_audio_{len(final_audio_chunks):02d}.mp3")
                     if concatenate_audio_files(chunk_to_merge, output_file):
                         final_audio_chunks.append(output_file)
                     else:
@@ -2580,7 +2579,7 @@ class TranslationApp:
         lang_output_path = os.path.join(rewrite_base_dir, video_title, lang_code.upper())
         os.makedirs(lang_output_path, exist_ok=True)
         
-        temp_dir = os.path.join(lang_output_path, "temp_chunks")
+        temp_dir = os.path.join(lang_output_path, "temp")
         keep_temp_files = self.config['parallel_processing']['keep_temp_files']
 
         try:
@@ -2663,7 +2662,7 @@ class TranslationApp:
             image_chunks = np.array_split(all_images, len(final_audio_chunks))
             video_chunk_paths = []
             with concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-                video_futures = {executor.submit(video_chunk_worker, self, list(image_chunks[i]), final_audio_chunks[i], subs_chunk_paths[i], os.path.join(video_chunk_dir, f"video_chunk_{i}.mp4"), i + 1, len(final_audio_chunks)): i for i in range(len(final_audio_chunks))}
+                video_futures = {executor.submit(video_chunk_worker, self, list(image_chunks[i]), final_audio_chunks[i], subs_chunk_paths[i], os.path.join(video_chunk_dir, f"video_chunk_{i:02d}.mp4"), i + 1, len(final_audio_chunks)): i for i in range(len(final_audio_chunks))}
                 for f in concurrent.futures.as_completed(video_futures):
                     result = f.result()
                     if result: video_chunk_paths.append(result)
@@ -2705,7 +2704,7 @@ class TranslationApp:
         clear_firebase_images(self)\
     
     def update_progress_for_montage(self, message, task_key=None, chunk_index=None, progress=None):
-        logger.info(f"[Montage Progress] {message}")
+        logger.info(f"{message}")
         if task_key is not None and chunk_index is not None and progress is not None:
             with self.video_progress_lock:
                 if task_key not in self.video_chunk_progress:

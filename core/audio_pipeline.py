@@ -313,10 +313,12 @@ class AudioWorkerPool:
     def _generate_transcription_chunk(self, item: TranscriptionPipelineItem) -> Optional[str]:
         """Генерує транскрипцію для аудіо файлу."""
         try:
-            subs_dir = os.path.join(item.output_dir, "subs")
+            # item.output_dir = temp/audio, піднімаємося на рівень temp
+            parent_temp_dir = os.path.dirname(item.output_dir)
+            subs_dir = os.path.join(parent_temp_dir, "subs")
             os.makedirs(subs_dir, exist_ok=True)
             
-            subs_path = os.path.join(subs_dir, f"subs_chunk_{item.chunk_index}.ass")
+            subs_path = os.path.join(subs_dir, f"subs_chunk_{item.chunk_index:02d}.ass")
             
             if self.app.montage_api.create_subtitles(item.audio_path, subs_path, item.lang_code):
                 return subs_path
